@@ -1,15 +1,7 @@
-# Nova Act for browser automation
-nova-act
-
-# AgentCore Browser Tool (optional - for production browser sessions)
+# Flight Agent Dependencies
 bedrock-agentcore
-
-# Data validation and modeling
+strands-agents
+boto3
+requests
 pydantic
-
-# Testing
-pytest
-pytest-asyncio
-
-# HTTP client for future API integrations
-httpx
+nova-act

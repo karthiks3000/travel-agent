@@ -1,119 +1,72 @@
-#!/usr/bin/env python3
 """
-Demo script for Flight Agent - Nova Act Implementation with AgentCore Browser Tool support
-
-Run this script to test both local browser and AgentCore browser functionality.
-Make sure to set NOVA_ACT_API_KEY environment variable first.
+Demo script for the new Strands-based Flight Agent
+Shows how to use the agent with natural language requests
 """
-
 import os
 import sys
-from flight_search import FlightSearcher
-from models.flight_models import FlightSearchResults
+from datetime import datetime, timedelta
 
-def demo_flight_search():
-    """Demonstrate flight search functionality with both browser types"""
+# Add project root to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from flight_agent import agent
+
+def test_natural_language_requests():
+    """Test the flight agent with various natural language requests"""
     
-    print("🛫 Flight Agent Demo - Local Browser + AgentCore Browser")
-    print("=" * 60)
+    print("="*60)
+    print("FLIGHT AGENT - NATURAL LANGUAGE DEMO")
+    print("="*60)
     
-    # Check for API key
-    if not os.getenv('NOVA_ACT_API_KEY'):
-        print("❌ Error: NOVA_ACT_API_KEY environment variable not set")
-        print("\n📝 To get an API key:")
-        print("   1. Visit: https://nova.amazon.com/act")
-        print("   2. Generate your API key")  
-        print("   3. Set environment variable: export NOVA_ACT_API_KEY='your_key'")
-        print("   4. Run this demo again")
-        return
-    
-    # Demo configurations - test both browser types
-    demo_configs = [
+    # Test cases with natural language requests
+    test_cases = [
         {
-            "name": "Local Browser Demo",
-            "use_agentcore": False,
-            "region": None,
-            "search": {
-                "origin": "JFK",
-                "destination": "CDG", 
-                "departure_date": "2025-10-01",
-                "passengers": 1
-            }
+            "request": "Find me the cheapest flight from New York to Los Angeles for next Friday",
+            "description": "Simple one-way search with relative date"
         },
-        # {
-        #     "name": "AgentCore Browser Demo", 
-        #     "use_agentcore": True,
-        #     "region": "us-east-1",
-        #     "search": {
-        #         "origin": "JFK",
-        #         "destination": "LAX",
-        #         "departure_date": "2025-10-15",
-        #         "passengers": 2
-        #     }
-        # }
+        {
+            "request": "I need round-trip flights from JFK to CDG departing June 15th and returning June 22nd for 2 passengers",
+            "description": "Round-trip search with specific dates and multiple passengers"
+        },
+        {
+            "request": "Show me flights from Miami to Tokyo tomorrow",
+            "description": "International flight with relative date"
+        }
     ]
     
-    for i, config in enumerate(demo_configs, 1):
-        print(f"\n🔍 Demo {i}: {config['name']}")
-        print("-" * 50)
+    for i, test_case in enumerate(test_cases, 1):
+        print(f"\n{'-'*40}")
+        print(f"TEST {i}: {test_case['description']}")
+        print(f"Request: \"{test_case['request']}\"")
+        print(f"{'-'*40}")
         
         try:
-            # Create flight searcher with appropriate configuration
-            if config['use_agentcore']:
-                searcher = FlightSearcher(use_agentcore_browser=True, region=config['region'])
-                print(f"✅ AgentCore Browser initialized (region: {config['region']})")
-            else:
-                searcher = FlightSearcher(use_agentcore_browser=False)
-                print("✅ Local Browser initialized")
+            # Use the agent's natural language processing
+            response = agent(test_case["request"])
+            print(f"Agent Response: {response}")
             
-            search_params = config['search']
-            
-            # Execute flight search
-            results = searcher.search_flights(
-                origin=search_params['origin'],
-                destination=search_params['destination'],
-                departure_date=search_params['departure_date'],
-                return_date=search_params.get('return_date'),
-                passengers=search_params['passengers']
-            )
-            
-            # Display results
-            print_flight_results(results)
-                
         except Exception as e:
-            print(f"❌ Demo {i} failed: {str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    print(f"\n✨ Demo completed!")
-    print("\n📚 Next steps:")
-    print("   - Both browser types are now available")
-    print("   - Local browser: FlightSearcher(use_agentcore_browser=False)")
-    print("   - AgentCore browser: FlightSearcher(use_agentcore_browser=True)")
-    print("   - Run tests: pytest . -v")
-    print("   - Ready for Strands Agent integration")
+            print(f"❌ Error: {str(e)}")
 
-def print_flight_results(results: FlightSearchResults):
-    """Helper function to display flight search results"""
+
+def main():
+    """Run all demo tests"""
     
-    if results.outbound_flights:
-        print(f"✅ Found {len(results.outbound_flights)} flight options:")
-        
-        for j, flight in enumerate(results.outbound_flights[:5], 1):
-            print(f"\n   {j}. {flight.airline}")
-            print(f"      {flight.departure_airport} {flight.departure_time} → {flight.arrival_airport} {flight.arrival_time}")
-            print(f"      Duration: {flight.duration} | Stops: {flight.stops} | Price: ${flight.price:.2f}")
-            
-            if flight.stop_details:
-                print(f"      Route: {flight.stop_details}")
-        
-        if len(results.outbound_flights) > 5:
-            print(f"   ... and {len(results.outbound_flights) - 5} more options")
-            
-    else:
-        print("❌ No flights found")
-        if results.search_metadata.get('error'):
-            print(f"   Error: {results.search_metadata['error']}")
+    # Check for required environment variable
+    if not os.getenv('NOVA_ACT_API_KEY'):
+        print("❌ Error: NOVA_ACT_API_KEY environment variable is required")
+        print("Please set your Nova Act API key before running the demo")
+        return
+    
+    print("Starting Flight Agent Demo...")
+    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    test_natural_language_requests()
+    
+    print("\n" + "="*60)
+    print("DEMO COMPLETED")
+    print("="*60)
+
 
 if __name__ == "__main__":
-    demo_flight_search()
+    main()

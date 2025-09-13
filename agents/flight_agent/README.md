@@ -1,19 +1,34 @@
-# Flight Agent - Nova Act Implementation
+# Flight Agent - Bedrock AgentCore Implementation
 
-A simple flight search agent using Nova Act browser automation to search Google Flights.
+A flight search agent using Nova Act browser automation and Strands framework for intelligent flight search on Google Flights.
 
 ## Setup
 
 ### Prerequisites
 - Python 3.10 or higher
 - Nova Act API key (get from https://nova.amazon.com/act)
+- AWS CLI configured (for deployment)
+
+### Development Setup (Required)
+
+Before running locally, create a symbolic link to the shared common directory:
+
+```bash
+# Navigate to flight agent directory
+cd agents/flight_agent
+
+# Create symbolic link to common directory (required for local development)
+ln -sf ../../common common
+
+# Verify the link was created
+ls -la common
+```
+
+**Important**: This symbolic link is required for local development to access shared browser automation code. It will be handled automatically during AgentCore deployment.
 
 ### Installation
 
 ```bash
-# Navigate to flight agent directory
-cd agents/flight-agent
-
 # Install dependencies
 pip install -r requirements.txt
 
@@ -29,147 +44,205 @@ playwright install chrome
 
 ## Usage
 
-### Basic Flight Search
+### As a Strands Agent
 
 ```python
-from flight_search import FlightSearcher
+from flight_agent import agent
 
-# Create searcher instance
-searcher = FlightSearcher()
+# Natural language flight search
+response = agent("Find me the cheapest flight from New York to Los Angeles for next Friday")
+print(response)
 
-# Search for flights
-results = searcher.search_flights(
-    origin="JFK",           # New York JFK
-    destination="CDG",      # Paris Charles de Gaulle
-    departure_date="2024-06-15",
-    passengers=2
-)
-
-# Display results
-for i, flight in enumerate(results.outbound_flights[:5], 1):
-    print(f"{i}. {flight.airline}")
-    print(f"   {flight.departure_airport} {flight.departure_time} → {flight.arrival_airport} {flight.arrival_time}")
-    print(f"   Duration: {flight.duration} | Price: ${flight.price} | Stops: {flight.stops}")
+# Specific flight search request
+response = agent("I need round-trip flights from JFK to CDG departing June 15th and returning June 22nd for 2 passengers")
+print(response)
 ```
 
-### Round-trip Search
+### Direct Tool Usage
 
 ```python
-# Search round-trip flights
-results = searcher.search_flights(
+from flight_agent import agent
+
+# Direct tool call
+result = agent.tool.search_google_flights(
     origin="JFK",
-    destination="CDG",
+    destination="LAX",
     departure_date="2024-06-15",
-    return_date="2024-06-22",  # Add return date
-    passengers=2
+    passengers=1
 )
+
+print(f"Success: {result.get('success')}")
+if result.get('outbound_flights'):
+    for flight in result['outbound_flights'][:3]:
+        print(f"{flight['airline']}: ${flight['price']} - {flight['duration']}")
 ```
 
-### Command Line Usage
+### Available Tool
+
+#### `search_google_flights(origin, destination, departure_date, return_date=None, passengers=1)`
+
+Search Google Flights for flight options.
+
+**Parameters:**
+- `origin`: Origin airport code or city (e.g., 'JFK', 'New York')
+- `destination`: Destination airport code or city (e.g., 'LAX', 'Los Angeles')
+- `departure_date`: Departure date in YYYY-MM-DD format
+- `return_date`: Return date for round-trip (optional)
+- `passengers`: Number of passengers (1-9)
+
+**Returns:**
+```json
+{
+  "success": true,
+  "search_params": {...},
+  "outbound_flights": [
+    {
+      "airline": "Delta",
+      "departure_time": "10:30 AM",
+      "arrival_time": "2:45 PM",
+      "departure_airport": "JFK",
+      "arrival_airport": "LAX",
+      "price": 542,
+      "duration": "5h 15m",
+      "stops": 0,
+      "booking_class": "Economy"
+    }
+  ]
+}
+```
+
+## Local Testing
+
+### Test the Agent
 
 ```bash
-# Run the example search
-python flight_search.py
+# Run local tests
+python flight_agent.py
+
+# Run demo with natural language examples
+python demo_strands.py
 ```
 
-## Testing
+### Direct API Testing
 
-### Run Unit Tests
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run specific test
-pytest tests/test_flight_search.py::TestFlightSearcher::test_successful_flight_search -v
+# Test a specific flight search
+python -c "
+from flight_agent import agent
+result = agent.tool.search_google_flights('JFK', 'LAX', '2024-06-15')
+print('Success:', result.get('success', False))
+"
 ```
 
-### Run Integration Tests (requires API key)
+## Deployment to AWS Bedrock AgentCore
+
+### Prerequisites for Deployment
+- AWS CLI configured with 'bookhood' profile
+- AgentCore CLI installed
+- Nova Act API key set in environment
+
+### Deploy to AgentCore
+
 ```bash
-# Run integration tests with real API key
-export NOVA_ACT_API_KEY="your_api_key"
-pytest tests/test_flight_search.py::TestFlightSearchIntegration -v -m integration
+# Set your Nova Act API key
+export NOVA_ACT_API_KEY="your_api_key_here"
+
+# Run deployment script
+./deploy-flight-agent.sh
 ```
 
-## Project Structure
+The deployment script will:
+1. ✅ Store API key securely in AWS Parameter Store
+2. ✅ Create IAM execution role with required permissions
+3. ✅ Temporarily copy common directory for build
+4. ✅ Deploy agent to Bedrock AgentCore using CodeBuild
+5. ✅ Clean up temporary files after deployment
+6. ✅ Test the deployed agent
 
+### Test Deployed Agent
+
+```bash
+# Test the deployed agent
+agentcore invoke '{"prompt": "Find me flights from JFK to LAX"}'
+
+# Check agent status
+agentcore status
 ```
-agents/flight-agent/
-├── flight_search.py              # Main flight search implementation
-├── models/
-│   └── flight_models.py          # Pydantic data models
-├── tests/
-│   └── test_flight_search.py     # Test suite
-├── requirements.txt              # Dependencies
-└── README.md                     # This file
+
+## Architecture
+
+The flight agent uses:
+- **Nova Pro Model**: For natural language understanding and response generation
+- **Nova Act Browser Automation**: For Google Flights interaction
+- **Shared Browser Wrapper**: Reusable browser automation component
+- **Parameter Store**: Secure API key management
+- **AgentCore Runtime**: Production deployment platform
+
+## Browser Configuration
+
+### Local Browser (Default for Development)
+```python
+# Uses local Chrome installation
+# Set via environment: USE_AGENTCORE_BROWSER=false
 ```
 
-## How It Works
-
-1. **Nova Act Browser Automation**: Opens Google Flights in a headless Chrome browser
-2. **Step-by-Step Navigation**: Breaks down the search into small, reliable steps
-3. **Structured Data Extraction**: Uses Pydantic schemas to extract flight data with validation
-4. **Error Handling**: Gracefully handles browser failures and parsing errors
+### AgentCore Browser (Production)
+```python
+# Uses AgentCore managed browser sessions
+# Set via environment: USE_AGENTCORE_BROWSER=true
+```
 
 ## Key Features
 
-- ✅ **Reliable Automation**: Uses Nova Act's proven browser automation patterns
-- ✅ **Structured Data**: Pydantic models ensure data quality and type safety  
-- ✅ **Comprehensive Testing**: Unit tests and integration tests included
-- ✅ **Error Resilience**: Handles browser failures and unexpected page layouts
-- ✅ **Schema Validation**: Ensures extracted flight data matches expected format
-
-## Next Steps
-
-This implementation is designed to be iteratively enhanced:
-
-1. **Current**: Standalone Nova Act flight search
-2. **Next**: Integrate with Strands Agents framework
-3. **Future**: Deploy as AgentCore Runtime specialist agent
-4. **Integration**: Connect with multi-agent orchestrator system
+- ✅ **Natural Language Interface**: Understands requests like "find flights next Friday"
+- ✅ **Date Intelligence**: Interprets relative dates using current date context
+- ✅ **Google Flights Integration**: Platform-specific search logic
+- ✅ **Structured Data**: Returns validated flight information
+- ✅ **Error Handling**: Graceful failure handling and reporting
+- ✅ **Deployment Ready**: Full AgentCore integration for production use
 
 ## Troubleshooting
 
 ### Common Issues
 
-**API Key Error**
-```
-ValueError: NOVA_ACT_API_KEY environment variable is required
-```
-Solution: Set your Nova Act API key: `export NOVA_ACT_API_KEY="your_key"`
-
-**SSL Certificate Error**
-```
-SSL Certificate verification failed for https://www.google.com/travel/flights
-```
-Solution: The code includes `ignore_https_errors=True` to handle SSL issues. If problems persist, ensure your SSL certificates are up to date:
+**Import Error: No module named 'common'**
 ```bash
-# On macOS with Homebrew
-brew update && brew upgrade openssl
+# Ensure symbolic link is created
+cd agents/flight_agent
+ln -sf ../../common common
+ls -la common  # Should show link to ../../common
 ```
 
-**Asyncio Loop Conflict**
-```
-playwright._impl._errors.Error: It looks like you are using Playwright Sync API inside the asyncio loop.
-```
-Solution: The implementation automatically handles this by running Nova Act in a separate thread using `ThreadPoolExecutor`. This isolates Nova Act's synchronous Playwright API from any existing asyncio event loops.
+**Agent Runtime Error in AgentCore**
+- Check CloudWatch logs: `/aws/bedrock-agentcore/runtimes/flight_agent-*/`
+- Verify Nova Act API key in Parameter Store
+- Ensure IAM role has all required permissions
 
-**Chrome Installation Issues**
-```
-Error: Browser not found
-```
-Solution: Install Chrome: `playwright install chrome`
+**Browser Automation Timeouts**
+- Google Flights interface may have changed
+- Check if basic economy dialog appears and needs handling
+- Verify Nova Act API key is valid
 
-**Headless Mode Debugging**
-For debugging browser automation, set `headless=False` in `flight_search.py` to see the browser in action:
-```python
-with NovaAct(
-    starting_page="https://www.google.com/travel/flights",
-    headless=False,  # Change to False for debugging
-    # ... other parameters
-) as nova:
+### Development Commands
+
+```bash
+# Local testing
+python flight_agent.py
+
+# Natural language demo
+python demo_strands.py
+
+# Deploy to AgentCore
+./deploy-flight-agent.sh
+
+# Check deployment status
+agentcore status
+
+# Update deployed agent
+agentcore launch
+
+# Remove deployed agent
+agentcore destroy
 ```
 
-### Getting Help
-
-- Nova Act issues: https://github.com/aws/nova-act/issues
-- Contact: nova-act@amazon.com
+The flight agent is designed to work both as a standalone tool and as part of a larger multi-agent travel planning system.

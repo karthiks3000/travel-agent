@@ -6,3 +6,4 @@ agents/flight-agent/models/__pycache__/
 __pycache__
 agents/food_agent/.dockerignore
 agents/food_agent/.bedrock_agentcore.yaml
+agents/flight_agent/.bedrock_agentcore.yaml
