@@ -69,28 +69,8 @@ if ! command -v agentcore >/dev/null 2>&1; then
 fi
 print_status "AgentCore CLI installed"
 
-# Check Docker functionality (not just installation)
-if command -v docker >/dev/null 2>&1; then
-    # Test if Docker is actually running and functional
-    if docker info >/dev/null 2>&1; then
-        print_status "Docker is running and functional"
-        
-        # Check for corporate VPN/SSL certificate issues
-        if [[ -n "$CURL_CA_BUNDLE" ]] || [[ -n "$REQUESTS_CA_BUNDLE" ]]; then
-            print_warning "Corporate SSL certificates detected - may cause Docker build issues"
-            print_warning "If build fails, will automatically fallback to CodeBuild"
-        fi
-        
-        USE_LOCAL_BUILD=true
-    else
-        print_warning "Docker installed but not running properly - will use CodeBuild"
-        print_warning "To fix: Start Docker service or Docker Desktop"
-        USE_LOCAL_BUILD=false
-    fi
-else
-    print_warning "Docker not found - will use CodeBuild (cloud-based building)"
-    USE_LOCAL_BUILD=false
-fi
+# Using CodeBuild as default (no Docker/Podman checks)
+print_status "Using CodeBuild for deployment (default option)"
 
 # Check Google Places API Key
 if [[ -z "$GOOGLE_PLACES_API_KEY" ]]; then
@@ -349,87 +329,28 @@ print_status "Role ARN: $EXECUTION_ROLE_ARN"
 echo -e "\n${BLUE}Step 4: Configuring AgentCore Agent${NC}"
 echo "--------------------------------------------"
 
-# Configure agent (with or without container runtime based on availability)
-if [[ "$USE_LOCAL_BUILD" == "true" ]]; then
-    # Configure with Docker for local builds and custom execution role
-    if agentcore configure \
-        --entrypoint food_agent.py \
-        --name $AGENT_NAME \
-        --execution-role "$EXECUTION_ROLE_ARN" \
-        --container-runtime docker \
-        --requirements-file requirements.txt \
-        --region $REGION; then
-        print_status "AgentCore agent configured with Docker and custom IAM role: $AGENT_NAME"
-    else
-        print_error "AgentCore configuration failed"
-        exit 1
-    fi
+# Configure with CodeBuild
+if agentcore configure \
+    --entrypoint food_agent.py \
+    --name $AGENT_NAME \
+    --execution-role "$EXECUTION_ROLE_ARN" \
+    --requirements-file requirements.txt \
+    --region $REGION; then
+    print_status "AgentCore agent configured for CodeBuild with custom IAM role: $AGENT_NAME"
 else
-    # Configure without container runtime for CodeBuild but with custom execution role
-    if agentcore configure \
-        --entrypoint food_agent.py \
-        --name $AGENT_NAME \
-        --execution-role "$EXECUTION_ROLE_ARN" \
-        --requirements-file requirements.txt \
-        --region $REGION; then
-        print_status "AgentCore agent configured for CodeBuild with custom IAM role: $AGENT_NAME"
-    else
-        print_error "AgentCore configuration failed"
-        exit 1
-    fi
+    print_error "AgentCore configuration failed"
+    exit 1
 fi
 
-# Step 5: Deploy (Local Build or CodeBuild with SSL fallback)
-if [[ "$USE_LOCAL_BUILD" == "true" ]]; then
-    echo -e "\n${BLUE}Step 5: Deploying with Local Build (Docker)${NC}"
-    echo "--------------------------------------------"
-    
-    # Temporarily disable exit on error for Docker build attempt
-    set +e
-    agentcore launch --local-build
-    DOCKER_BUILD_SUCCESS=$?
-    set -e
-    
-    if [[ $DOCKER_BUILD_SUCCESS -eq 0 ]]; then
-        print_status "Agent deployed successfully with local Docker build"
-        ACTUAL_BUILD_METHOD="Docker"
-    else
-        print_warning "Docker build failed (likely SSL/VPN issues) - falling back to CodeBuild"
-        echo -e "\n${BLUE}Step 5b: Fallback to CodeBuild${NC}"
-        echo "--------------------------------------------"
-        
-        # Reconfigure without container runtime for CodeBuild but with custom execution role
-        if agentcore configure \
-            --entrypoint food_agent.py \
-            --name $AGENT_NAME \
-            --execution-role "$EXECUTION_ROLE_ARN" \
-            --requirements-file requirements.txt \
-            --region $REGION; then
-            print_status "Reconfigured for CodeBuild with custom IAM role"
-        else
-            print_error "Failed to reconfigure for CodeBuild"
-            exit 1
-        fi
-        
-        # Try CodeBuild deployment
-        if agentcore launch; then
-            print_status "Agent deployed successfully with CodeBuild (SSL fallback)"
-            ACTUAL_BUILD_METHOD="CodeBuild (SSL fallback)"
-        else
-            print_error "Both Docker and CodeBuild deployment failed"
-            exit 1
-        fi
-    fi
+# Step 5: Deploy with CodeBuild
+echo -e "\n${BLUE}Step 5: Deploying with CodeBuild${NC}"
+echo "--------------------------------------------"
+
+if agentcore launch; then
+    print_status "Agent deployed successfully with CodeBuild"
 else
-    echo -e "\n${BLUE}Step 5: Deploying with CodeBuild${NC}"
-    echo "--------------------------------------------"
-    
-    if agentcore launch; then
-        print_status "Agent deployed successfully with CodeBuild"
-    else
-        print_error "Agent deployment failed"
-        exit 1
-    fi
+    print_error "Agent deployment failed"
+    exit 1
 fi
 
 # Step 6: Get deployment details
@@ -465,11 +386,7 @@ echo -e "\n${GREEN}🎉 Food Agent Deployment Complete!${NC}"
 echo -e "${GREEN}=================================${NC}"
 echo -e "✅ Parameter Store configured with API key"
 echo -e "✅ Custom IAM role with Parameter Store access"
-if [[ "$USE_LOCAL_BUILD" == "true" ]]; then
-    echo -e "✅ Agent built locally with Docker"  
-else
-    echo -e "✅ Agent built with CodeBuild (cloud-based)"
-fi
+echo -e "✅ Agent built with CodeBuild (cloud-based)"
 echo -e "✅ Agent deployed to AWS AgentCore"
 echo -e "✅ Ready for integration with Travel Orchestrator"
 
