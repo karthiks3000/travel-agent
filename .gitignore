@@ -1,0 +1,6 @@
+agents/flight-agent/__pycache__/
+agents/flight-agent/models/__pycache__/
+.venv
+.vscode
+.pytest_cache
+__pycache__
