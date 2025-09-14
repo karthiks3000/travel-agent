@@ -5,3 +5,4 @@ __pycache__/
 __pycache__
 .dockerignore
 .bedrock_agentcore.yaml
+agents/travel_orchestrator/common
