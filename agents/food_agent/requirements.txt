@@ -2,3 +2,4 @@ bedrock-agentcore
 strands-agents
 boto3
 requests
+aws-opentelemetry-distro>=0.10.0

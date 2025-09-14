@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Flight Agent Deployment Script
+# Accommodation Agent Deployment Script
 # Automates Parameter Store setup and AgentCore deployment
 
 # Colors for output
@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # Configuration
 AWS_PROFILE="bookhood"
 PARAMETER_NAME="/travel-agent/nova-act-api-key"
-AGENT_NAME="flight_agent"
+AGENT_NAME="accommodation_agent"
 
 # Get AWS account ID and region dynamically
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --profile $AWS_PROFILE)
@@ -26,8 +26,8 @@ if [[ -z "$REGION" ]]; then
     print_warning "No region configured in AWS profile, using default: $REGION"
 fi
 
-echo -e "${BLUE}✈️  Flight Agent Deployment Script${NC}"
-echo -e "${BLUE}===================================${NC}"
+echo -e "${BLUE}🏠 Accommodation Agent Deployment Script${NC}"
+echo -e "${BLUE}=========================================${NC}"
 
 # Function to print status
 print_status() {
@@ -47,8 +47,8 @@ echo -e "\n${BLUE}Step 1: Checking Prerequisites${NC}"
 echo "----------------------------------------"
 
 # Check if running from correct directory
-if [[ ! -f "flight_agent.py" ]]; then
-    print_error "Please run this script from the agents/flight_agent directory"
+if [[ ! -f "accommodation_agent.py" ]]; then
+    print_error "Please run this script from the agents/accommodation_agent directory"
     exit 1
 fi
 
@@ -142,7 +142,7 @@ fi
 echo -e "\n${BLUE}Step 3: Setting up IAM Role${NC}"
 echo "-------------------------------------------"
 
-IAM_ROLE_NAME="FlightAgentExecutionRole"
+IAM_ROLE_NAME="AccommodationAgentExecutionRole"
 IAM_TRUST_POLICY='{
     "Version": "2012-10-17",
     "Statement": [
@@ -278,7 +278,7 @@ IAM_ROLE_POLICY=$(cat <<EOF
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default/apikeycredentialprovider/*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default",
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/flight_agent-*"
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/accommodation_agent-*"
             ]
         },
         {
@@ -291,7 +291,7 @@ IAM_ROLE_POLICY=$(cat <<EOF
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default/oauth2credentialprovider/*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default",
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/flight_agent-*"
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/accommodation_agent-*"
             ]
         },
         {
@@ -304,7 +304,7 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ],
             "Resource": [
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default",
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/flight_agent-*"
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/accommodation_agent-*"
             ]
         },
         {
@@ -321,27 +321,22 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ]
         },
         {
-            "Version": "2012-10-17"		 	 	 ,
-            "Statement": [
-                {
-                    "Sid": "BedrockAgentCoreInBuiltToolsFullAccess",
-                    "Effect": "Allow",
-                    "Action": [
-                        "bedrock-agentcore:CreateBrowser",
-                        "bedrock-agentcore:ListBrowsers",
-                        "bedrock-agentcore:GetBrowser",
-                        "bedrock-agentcore:DeleteBrowser",
-                        "bedrock-agentcore:StartBrowserSession",
-                        "bedrock-agentcore:ListBrowserSessions",
-                        "bedrock-agentcore:GetBrowserSession",
-                        "bedrock-agentcore:StopBrowserSession",
-                        "bedrock-agentcore:UpdateBrowserStream",
-                        "bedrock-agentcore:ConnectBrowserAutomationStream",
-                        "bedrock-agentcore:ConnectBrowserLiveViewStream"
-                    ],
-                    "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:browser/*"
-                }
-            ]
+            "Sid": "BedrockAgentCoreInBuiltToolsFullAccess",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:CreateBrowser",
+                "bedrock-agentcore:ListBrowsers",
+                "bedrock-agentcore:GetBrowser",
+                "bedrock-agentcore:DeleteBrowser",
+                "bedrock-agentcore:StartBrowserSession",
+                "bedrock-agentcore:ListBrowserSessions",
+                "bedrock-agentcore:GetBrowserSession",
+                "bedrock-agentcore:StopBrowserSession",
+                "bedrock-agentcore:UpdateBrowserStream",
+                "bedrock-agentcore:ConnectBrowserAutomationStream",
+                "bedrock-agentcore:ConnectBrowserLiveViewStream"
+            ],
+            "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:browser/*"
         },
         {
             "Sid": "ParameterStoreAccess",
@@ -367,7 +362,7 @@ aws iam create-role \
 # Attach the comprehensive policy to the role
 aws iam put-role-policy \
     --role-name $IAM_ROLE_NAME \
-    --policy-name "FlightAgentExecutionPolicy" \
+    --policy-name "AccommodationAgentExecutionPolicy" \
     --policy-document "$IAM_ROLE_POLICY" \
     --profile $AWS_PROFILE >/dev/null 2>&1
 
@@ -383,7 +378,7 @@ echo "--------------------------------------------"
 
 # Configure with CodeBuild (using symbolic link to common directory)
 if agentcore configure \
-    --entrypoint flight_agent.py \
+    --entrypoint accommodation_agent.py \
     --name $AGENT_NAME \
     --execution-role "$EXECUTION_ROLE_ARN" \
     --requirements-file requirements.txt \
@@ -421,9 +416,9 @@ echo "Parameter Store: $PARAMETER_NAME"
 echo -e "\n${BLUE}Step 7: Testing Deployment${NC}"
 echo "-------------------------------"
 
-print_status "Testing agent with sample flight search query..."
+print_status "Testing agent with sample accommodation search query..."
 
-TEST_PAYLOAD='{"prompt": "Find me flights from JFK to LAX"}'
+TEST_PAYLOAD='{"prompt": "Find me an airbnb in Paris for 2 guests for next month"}'
 
 if agentcore invoke "$TEST_PAYLOAD" >/dev/null 2>&1; then
     print_status "Agent test successful!"
@@ -434,8 +429,8 @@ else
 fi
 
 # Success summary
-echo -e "\n${GREEN}🎉 Flight Agent Deployment Complete!${NC}"
-echo -e "${GREEN}====================================${NC}"
+echo -e "\n${GREEN}🎉 Accommodation Agent Deployment Complete!${NC}"
+echo -e "${GREEN}===========================================${NC}"
 echo -e "✅ Parameter Store configured with Nova Act API key"
 echo -e "✅ Custom IAM role with Parameter Store access"
 echo -e "✅ Agent built with CodeBuild (cloud-based)"

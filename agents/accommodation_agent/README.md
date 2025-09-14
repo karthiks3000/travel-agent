@@ -20,6 +20,75 @@ pip install -r requirements.txt
 export NOVA_ACT_API_KEY=your_api_key_here
 ```
 
+## Deployment
+
+### AWS AgentCore Deployment
+
+The accommodation agent includes a comprehensive deployment script for AWS AgentCore:
+
+```bash
+# Prerequisites
+# 1. AWS CLI configured with 'bookhood' profile
+# 2. AgentCore CLI installed
+# 3. Nova Act API key in environment
+
+# Deploy to AWS AgentCore
+cd agents/accommodation_agent
+./deploy-accommodation-agent.sh
+```
+
+**What the deployment script does:**
+- ✅ Verifies prerequisites (AWS CLI, AgentCore, API key)
+- ✅ Sets up AWS Parameter Store for secure API key storage
+- ✅ Creates custom IAM role with all necessary permissions
+- ✅ Configures AgentCore with proper entrypoint and dependencies
+- ✅ Deploys using CodeBuild (cloud-based container building)
+- ✅ Tests deployment with sample accommodation search
+- ✅ Provides useful management commands
+
+**Key Features:**
+- **Secure**: API keys stored in AWS Parameter Store
+- **Production-Ready**: Includes OpenTelemetry monitoring and CloudWatch logging
+- **Browser Automation**: Full AgentCore browser support for Airbnb/Booking.com
+- **Cloud-Native**: CodeBuild deployment, no local Docker required
+
+### Manual Deployment
+
+For local development or custom deployment:
+
+```bash
+# Build Docker container
+docker build -t accommodation-agent .
+
+# Run locally
+docker run -p 8080:8080 -e NOVA_ACT_API_KEY=your_key accommodation-agent
+```
+
+### Deployment Files
+
+- `deploy-accommodation-agent.sh`: Complete deployment automation
+- `Dockerfile`: Container configuration with OpenTelemetry
+- `.dockerignore`: Optimized container builds
+- `requirements.txt`: Python dependencies
+
+### Post-Deployment
+
+After successful deployment:
+
+```bash
+# Test the deployed agent
+agentcore invoke '{"prompt": "Find accommodation in Paris for 2 guests from 2024-06-15 to 2024-06-18"}'
+
+# Check agent status
+agentcore status
+
+# View logs
+# Available in CloudWatch: /aws/bedrock-agentcore/runtimes/accommodation_agent
+
+# Update agent
+agentcore launch
+```
+
 ## Usage
 
 ### As a Strands Agent
