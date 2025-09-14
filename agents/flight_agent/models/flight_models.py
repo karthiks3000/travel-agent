@@ -19,10 +19,11 @@ class FlightResult(BaseModel):
     booking_class: str = Field(default="Economy", description="Booking class")
     
 class FlightSearchResults(BaseModel):
-    """Complete flight search results"""
-    outbound_flights: List[FlightResult] = Field(default_factory=list, description="List of outbound flight options")
-    return_flights: List[FlightResult] = Field(default_factory=list, description="List of return flight options (if round-trip)")
+    """Complete flight search results with best flight selections"""
+    best_outbound_flight: Optional[FlightResult] = Field(None, description="Best selected outbound flight based on cost and convenience")
+    best_return_flight: Optional[FlightResult] = Field(None, description="Best selected return flight (if round-trip)")
     search_metadata: dict = Field(default_factory=dict, description="Additional search metadata")
+    recommendation: str = Field(..., description="Agent's personalized flight recommendations and booking advice")
 
 class FlightSearchParams(BaseModel):
     """Parameters for flight search"""
