@@ -4,13 +4,13 @@ Accommodation Agent - Bedrock AgentCore implementation with Nova Act browser aut
 import os
 import sys
 import boto3
-from datetime import datetime
+from datetime import datetime, timedelta
 from strands import Agent, tool
 from typing import Optional, Dict, Any
 from bedrock_agentcore import BedrockAgentCoreApp
 
 from common.browser_wrapper import BrowserWrapper
-from models.accommodation_models import PlatformSearchResults
+from models.accommodation_models import PlatformSearchResults, AccommodationAgentResponse
 
 # Module-level browser wrapper - initialized by AccommodationAgent
 browser_wrapper = None
@@ -27,6 +27,77 @@ def get_parameter(name):
         return None
 
 
+@tool
+def validate_inputs(location: str, check_in: str, check_out: str, guests: int = 2, rooms: int = 1) -> Dict[str, Any]:
+    """
+    Validate accommodation search inputs
+    
+    Args:
+        location: Destination city or location (e.g., 'Paris, France', 'Manhattan, NYC')
+        check_in: Check-in date in YYYY-MM-DD format
+        check_out: Check-out date in YYYY-MM-DD format
+        guests: Number of guests (1-30)
+        rooms: Number of rooms (1-8)
+        
+    Returns:
+        Dictionary with validation result: {"valid": bool, "error": str or None}
+    """
+    try:
+        # Get current date
+        today = datetime.now().date()
+        
+        # Validate location is provided
+        if not location or not location.strip():
+            return {"valid": False, "error": "Location is required for accommodation search."}
+        
+        # Validate guests count
+        if guests < 1 or guests > 30:
+            return {"valid": False, "error": f"Invalid guest count: {guests}. Must be between 1-30."}
+        
+        # Validate rooms count
+        if rooms < 1 or rooms > 8:
+            return {"valid": False, "error": f"Invalid room count: {rooms}. Must be between 1-8."}
+        
+        # Parse and validate check-in date
+        try:
+            if check_in.lower() == "tomorrow":
+                checkin_date = today + timedelta(days=1)
+            elif check_in.lower() == "today":
+                checkin_date = today
+            else:
+                checkin_date = datetime.strptime(check_in, "%Y-%m-%d").date()
+        except ValueError:
+            return {"valid": False, "error": f"Invalid check-in date format: {check_in}. Use YYYY-MM-DD format."}
+        
+        # Check if check-in date is in the past
+        if checkin_date < today:
+            return {"valid": False, "error": f"Past date: {checkin_date}. Check-in date must be today or in the future."}
+        
+        # Parse and validate check-out date
+        try:
+            if check_out.lower() == "tomorrow":
+                checkout_date = today + timedelta(days=1)
+            elif check_out.lower() == "today":
+                checkout_date = today
+            else:
+                checkout_date = datetime.strptime(check_out, "%Y-%m-%d").date()
+        except ValueError:
+            return {"valid": False, "error": f"Invalid check-out date format: {check_out}. Use YYYY-MM-DD format."}
+        
+        # Check if check-out date is in the past
+        if checkout_date < today:
+            return {"valid": False, "error": f"Past date: {checkout_date}. Check-out date must be today or in the future."}
+        
+        # Check if check-out date is after check-in date
+        if checkout_date <= checkin_date:
+            return {"valid": False, "error": f"Check-out date ({checkout_date}) must be after check-in date ({checkin_date})."}
+        
+        return {"valid": True, "error": None}
+        
+    except Exception as e:
+        return {"valid": False, "error": f"Validation error: {str(e)}"}
+
+
 @tool(description="Search Airbnb for accommodation options using browser automation")
 def search_airbnb(location: str, check_in: str, check_out: str, guests: int = 2) -> Dict[str, Any]:
     """
@@ -39,54 +110,43 @@ def search_airbnb(location: str, check_in: str, check_out: str, guests: int = 2)
         guests: Number of guests (1-16)
         
     Returns:
-        Dictionary with Airbnb search results
+        PlatformSearchResults with Airbnb property listings
     """
     print(f"🏠 Searching Airbnb: {location} | {check_in} to {check_out} | {guests} guests")
     
     try:
-        # Format instructions with actual values for Airbnb
+        # Simplified instructions for Airbnb search
         instructions = [
-            f"Click on the location search field and enter '{location}'",
-            "Wait for location suggestions to appear and select the first relevant option",
-            f"Click on the check-in date field",
-            f"Navigate to the calendar and select {check_in} as check-in date",
-            f"Navigate to the calendar and select {check_out} as check-out date",
-            f"Click on the guests field",
-            f"Set the number of adults to {guests}",
-            "Click the Search button to start searching for properties",
-            "Wait for the search results page to load completely",
-            "Click on the Filters button if available",
-            "Apply filter for 'Entire home' if available in the Type of place section",
-            "Apply 'Guest favourite' filter if available in the Recommended section",
-            "Click 'Show X+ places' button to apply filters if any were selected"
+            f"find the best accommodations in {location} checking in {check_in} and checking out {check_out} for {guests} guests"
         ]
         
-        extraction_instruction = f"""Extract Airbnb property listings from the search results page and return them in PlatformSearchResults format.
-        
-        For each visible property listing (up to 20), create a PropertyResult object with these exact fields:
-        
-        - platform: "airbnb"
-        - title: Property title/description text
-        - price_per_night: Numeric price per night (no currency symbols)
-        - total_price: Total stay price if displayed, otherwise null
-        - rating: Decimal rating (e.g., 4.85) if visible, otherwise null
-        - review_count: Number of reviews as integer if visible, otherwise null
-        - property_type: Property type description (e.g., "Entire apartment", "Private room")
-        - host_name: Host name if displayed, otherwise null
-        - location: Neighborhood/area mentioned in listing
-        - amenities: Array of amenity strings visible in preview (include "Superhost" and "Guest favourite" as amenities if badges are present)
-        - url: Property URL if extractable, otherwise null
-        - image_url: Main property image URL if extractable, otherwise null
-        - guests_capacity: Maximum guests number if shown, otherwise null
-        - bedrooms: Number of bedrooms if shown, otherwise null
-        - bathrooms: Number of bathrooms if shown, otherwise null
-        
-        Return as PlatformSearchResults with:
-        - platform: "airbnb"
-        - properties: array of PropertyResult objects
-        - search_successful: true
-        - total_found: number of properties found if displayed on page
-        - search_metadata: any additional search info"""
+        extraction_instruction = f"""Extract Airbnb property listings from the search results page.
+
+You should now see the Airbnb search results for accommodations. Extract the following information for each visible property listing (up to 10 properties):
+
+For each property:
+- platform: 'airbnb'
+- title: Property title/name as displayed
+- price_per_night: Nightly price as number (without $ symbol)
+- total_price: Total price for the stay if shown, or null
+- rating: Property rating (e.g., 4.85) or null if not shown
+- review_count: Number of reviews as integer, or null
+- property_type: Type like 'Entire apartment', 'Private room', etc.
+- host_name: Host's name or null if not displayed
+- location: Neighborhood/area description
+- amenities: Array of amenities shown (e.g., ['WiFi', 'Kitchen', 'Superhost']) or null
+- url: Property URL if available, or null
+- image_url: Main property image URL if available, or null
+- guests_capacity: Number of guests it accommodates, or null
+- bedrooms: Number of bedrooms, or null
+- bathrooms: Number of bathrooms, or null
+
+Additional search information:
+- search_successful: true if properties found, false if no results
+- total_found: Total number of properties found (if displayed)
+- search_metadata: Include location, check_in, check_out, guests from search
+
+Return the property listings in the proper schema format. Use null (not empty strings) for any missing or unavailable fields."""
         
         # Use module-level browser wrapper
         result = browser_wrapper.execute_instructions(
@@ -96,7 +156,8 @@ def search_airbnb(location: str, check_in: str, check_out: str, guests: int = 2)
             result_schema=PlatformSearchResults.model_json_schema()
         )
         
-        return {
+        # Add recommendation field for agent to customize
+        result_with_recommendation = {
             "success": True,
             "search_params": {
                 "location": location,
@@ -104,8 +165,11 @@ def search_airbnb(location: str, check_in: str, check_out: str, guests: int = 2)
                 "check_out": check_out,
                 "guests": guests
             },
-            **result
+            **result,
+            "recommendation": "Raw Airbnb search results - agent should provide personalized booking advice"
         }
+        
+        return result_with_recommendation
         
     except Exception as e:
         print(f"❌ Airbnb search failed: {str(e)}")
@@ -117,7 +181,12 @@ def search_airbnb(location: str, check_in: str, check_out: str, guests: int = 2)
                 "check_in": check_in,
                 "check_out": check_out,
                 "guests": guests
-            }
+            },
+            "platform": "airbnb",
+            "properties": [],
+            "search_successful": False,
+            "search_metadata": {"error": str(e)},
+            "recommendation": "Airbnb search failed. Please check your search parameters and try again."
         }
 
 
@@ -135,50 +204,43 @@ def search_booking_com(location: str, check_in: str, check_out: str, guests: int
         rooms: Number of rooms (1-8)
         
     Returns:
-        Dictionary with Booking.com search results
+        PlatformSearchResults with Booking.com property listings
     """
     print(f"🏨 Searching Booking.com: {location} | {check_in} to {check_out} | {guests} guests, {rooms} rooms")
     
     try:
-        # Format instructions with actual values for Booking.com
+        # Simplified instructions for Booking.com search
         instructions = [
-            f"Click on the destination search field and enter '{location}'",
-            "Wait for destination suggestions and select the first relevant city option",
-            f"Click on the check-in date field",
-            f"Navigate the calendar and select {check_in} as check-in date",
-            f"Navigate the calendar and select {check_out} as check-out date", 
-            f"Click on the guests and rooms selector",
-            f"Set {guests} adults and {rooms} room",
-            "Click the Search button to find accommodations",
-            "Wait for the search results to load completely",
+            f"find the best hotels and accommodations in {location} from {check_in} to {check_out} for {guests} guests in {rooms} rooms"
         ]
         
-        extraction_instruction = f"""Extract Booking.com property listings from the search results page and return them in PlatformSearchResults format.
-        
-        For each visible property listing (up to 20), create a PropertyResult object with these exact fields:
-        
-        - platform: "booking_com"
-        - title: Hotel/property name text
-        - price_per_night: Numeric price per night (no currency symbols)
-        - total_price: Total stay price if displayed, otherwise null
-        - rating: Decimal rating (e.g., 8.5, 9.2) if visible, otherwise null
-        - review_count: Number of reviews as integer if visible, otherwise null
-        - property_type: Property type description (e.g., "Hotel", "Apartment", "Guesthouse", "Resort")
-        - host_name: Hotel chain or property management name if displayed, otherwise null
-        - location: Specific area/district mentioned in listing
-        - amenities: Array of amenity strings visible (e.g., "Free WiFi", "Breakfast included", "Parking", "Pool")
-        - url: Property URL if extractable, otherwise null
-        - image_url: Main property image URL if extractable, otherwise null
-        - guests_capacity: Maximum guests number if shown, otherwise null
-        - bedrooms: Number of bedrooms if shown, otherwise null
-        - bathrooms: Number of bathrooms if shown, otherwise null
-        
-        Return as PlatformSearchResults with:
-        - platform: "booking_com"
-        - properties: array of PropertyResult objects
-        - search_successful: true
-        - total_found: number of properties found if displayed on page
-        - search_metadata: any additional search info"""
+        extraction_instruction = f"""Extract Booking.com property listings from the search results page.
+
+You should now see the Booking.com search results for hotels and accommodations. Extract the following information for each visible property listing (up to 10 properties):
+
+For each property:
+- platform: 'booking_com'
+- title: Hotel/property name as displayed
+- price_per_night: Nightly price as number (without $ symbol)
+- total_price: Total price for the stay if shown, or null
+- rating: Property rating (e.g., 8.5) or null if not shown
+- review_count: Number of reviews as integer, or null
+- property_type: Type like 'Hotel', 'Apartment', 'Resort', etc.
+- host_name: Hotel chain/brand name or null if not displayed
+- location: District/area description
+- amenities: Array of amenities shown (e.g., ['Free WiFi', 'Breakfast included', 'Pool']) or null
+- url: Property URL if available, or null
+- image_url: Main property image URL if available, or null
+- guests_capacity: Number of guests it accommodates, or null
+- bedrooms: Number of bedrooms, or null
+- bathrooms: Number of bathrooms, or null
+
+Additional search information:
+- search_successful: true if properties found, false if no results
+- total_found: Total number of properties found (if displayed)
+- search_metadata: Include location, check_in, check_out, guests, rooms from search
+
+Return the property listings in the proper schema format. Use null (not empty strings) for any missing or unavailable fields."""
         
         # Use module-level browser wrapper
         result = browser_wrapper.execute_instructions(
@@ -188,7 +250,8 @@ def search_booking_com(location: str, check_in: str, check_out: str, guests: int
             result_schema=PlatformSearchResults.model_json_schema()
         )
         
-        return {
+        # Add recommendation field for agent to customize
+        result_with_recommendation = {
             "success": True,
             "search_params": {
                 "location": location,
@@ -197,8 +260,11 @@ def search_booking_com(location: str, check_in: str, check_out: str, guests: int
                 "guests": guests,
                 "rooms": rooms
             },
-            **result
+            **result,
+            "recommendation": "Raw Booking.com search results - agent should provide personalized booking advice"
         }
+        
+        return result_with_recommendation
         
     except Exception as e:
         print(f"❌ Booking.com search failed: {str(e)}")
@@ -211,8 +277,123 @@ def search_booking_com(location: str, check_in: str, check_out: str, guests: int
                 "check_out": check_out,
                 "guests": guests,
                 "rooms": rooms
-            }
+            },
+            "platform": "booking_com",
+            "properties": [],
+            "search_successful": False,
+            "search_metadata": {"error": str(e)},
+            "recommendation": "Booking.com search failed. Please check your search parameters and try again."
         }
+
+
+@tool(description="Combine and sort accommodation results from multiple platforms")
+def combine_and_sort_results(airbnb_results: Dict[str, Any], 
+                           booking_results: Dict[str, Any],
+                           sort_by: str = "value") -> Dict[str, Any]:
+    """
+    Combine and sort results from Airbnb and Booking.com platforms
+    
+    Args:
+        airbnb_results: Results from search_airbnb tool (dictionary format)
+        booking_results: Results from search_booking_com tool (dictionary format)
+        sort_by: Sorting criteria ("value", "price", "rating")
+        
+    Returns:
+        Dictionary with combined and sorted properties
+    """
+    try:
+        # Get properties from dictionary results, handling both success and error cases
+        airbnb_properties = airbnb_results.get("properties", []) if airbnb_results.get("success", False) else []
+        booking_properties = booking_results.get("properties", []) if booking_results.get("success", False) else []
+        
+        print(f"🔄 Combining results from Airbnb ({len(airbnb_properties)}) and Booking.com ({len(booking_properties)})")
+        
+        # Combine all properties
+        all_properties = []
+        
+        # Convert dictionary properties to objects for sorting
+        from models.accommodation_models import PropertyResult
+        for prop_dict in airbnb_properties:
+            if isinstance(prop_dict, dict):
+                all_properties.append(PropertyResult(**prop_dict))
+            else:
+                all_properties.append(prop_dict)  # Already an object
+                
+        for prop_dict in booking_properties:
+            if isinstance(prop_dict, dict):
+                all_properties.append(PropertyResult(**prop_dict))
+            else:
+                all_properties.append(prop_dict)  # Already an object
+        
+        # Sort by different criteria
+        if sort_by == "price":
+            # Sort by price (ascending)
+            sorted_properties = sorted(all_properties, key=lambda x: x.price_per_night or float('inf'))
+        elif sort_by == "rating":
+            # Sort by rating (descending), handle None ratings
+            sorted_properties = sorted(all_properties, 
+                                     key=lambda x: x.rating if x.rating is not None else 0, 
+                                     reverse=True)
+        else:  # sort_by == "value" (default)
+            # Sort by value score: rating/price ratio, with rating weight
+            def value_score(prop):
+                if prop.rating is None or not prop.price_per_night or prop.price_per_night <= 0:
+                    return 0
+                # Higher rating and lower price = better value
+                return (prop.rating * 100) / prop.price_per_night
+            
+            sorted_properties = sorted(all_properties, key=value_score, reverse=True)
+        
+        # Take top 15 results (will be further filtered by agent to 5-10)
+        top_properties = sorted_properties[:15]
+        
+        # Create combined metadata
+        combined_metadata = {
+            "airbnb_count": len(airbnb_properties),
+            "booking_count": len(booking_properties),
+            "total_combined": len(all_properties),
+            "top_selected": len(top_properties),
+            "sort_criteria": sort_by,
+            "airbnb_successful": airbnb_results.get("success", False),
+            "booking_successful": booking_results.get("success", False)
+        }
+        
+        # Return dictionary format to match other search functions
+        return {
+            "success": True,
+            "search_params": {
+                "combined_search": True,
+                "sort_by": sort_by
+            },
+            "platform": "combined",
+            "properties": [prop.model_dump() for prop in top_properties],
+            "search_successful": True,
+            "total_found": len(all_properties),
+            "search_metadata": combined_metadata,
+            "recommendation": "Raw combined search results - agent should provide personalized booking advice"
+        }
+        
+    except Exception as e:
+        print(f"❌ Combining results failed: {str(e)}")
+        # Return error result in dictionary format
+        return {
+            "success": False,
+            "error": str(e),
+            "search_params": {
+                "combined_search": True,
+                "sort_by": sort_by
+            },
+            "platform": "combined",
+            "properties": [],
+            "search_successful": False,
+            "search_metadata": {
+                "error": str(e),
+                "airbnb_count": len(airbnb_results.get("properties", [])) if airbnb_results else 0,
+                "booking_count": len(booking_results.get("properties", [])) if booking_results else 0
+            },
+            "recommendation": "Combining search results failed. Please try searching individual platforms."
+        }
+
 
 class AccommodationAgent(Agent):
     def __init__(self):
@@ -241,52 +422,61 @@ class AccommodationAgent(Agent):
         
         super().__init__(
             model="amazon.nova-pro-v1:0",
-            tools=[search_airbnb, search_booking_com],
-            system_prompt=f"""You are an accommodation search specialist. Current date and time: {current_datetime}
+            tools=[validate_inputs, search_airbnb, search_booking_com, combine_and_sort_results],
+            system_prompt=f"""You are an accommodation search specialist that finds the BEST accommodations from multiple platforms. Current date and time: {current_datetime}
 
-You help users find places to stay by:
-1. Understanding natural language requests like "find me a place to stay in Paris for 3 nights starting tomorrow"
-2. Extracting key details: location, check-in/out dates, guest count, preferences, budget
-3. VALIDATING that ALL dates are TODAY or in the FUTURE before searching
-4. Using accommodation search tools to find options from Airbnb and Booking.com (only for valid future dates)
-5. Merging and presenting results from both platforms in a unified, helpful manner
-6. Sorting and filtering results based on user preferences (price, rating, location, etc.)
+CRITICAL: You MUST return ONLY valid JSON responses using the AccommodationAgentResponse schema. Never return natural language text.
 
-For relative dates like "tomorrow", "next week", or "next month", calculate them based on today's date: {current_date}
+Your process:
+1. Understand natural language requests like "find me a place to stay in Paris for 3 nights starting tomorrow"
+2. Extract key details: location, check-in/out dates, guest count, room count, preferences
+3. ALWAYS call validate_inputs tool first with the extracted parameters
+4. If validation fails (valid: false), return JSON error response with the validation error
+5. Only if validation passes (valid: true), INTELLIGENTLY choose which platform(s) to search based on user request
+6. SELECT and return only the BEST 5-10 accommodations from results
+7. Return ONLY the updated JSON structure - no additional text or formatting
 
-CRITICAL DATE VALIDATION RULES:
-- Only accept accommodation search requests for dates that are TODAY ({current_date}) or in the FUTURE
-- ALWAYS validate ALL dates (check_in AND check_out dates) before calling search tools
-- If ANY date is in the past (before {current_date}), REJECT the entire request immediately
-- DO NOT call search_airbnb or search_booking_com for any request with past dates
-- Provide helpful error messages explaining why past dates cannot be searched
-- Suggest alternative future dates when appropriate
+CRITICAL WORKFLOW:
+1. Call validate_inputs(location, check_in, check_out, guests, rooms)
+2. If validation result shows "valid": false, return error JSON immediately:
+   {{"best_accommodations": [], "search_metadata": {{"error": "[validation error message]"}}, "recommendation": "Please correct the validation error and try again."}}
+3. If validation result shows "valid": true, INTELLIGENTLY select platform(s) based on user request:
 
-Examples:
-✅ VALID: "Find accommodation starting tomorrow" (future date)
-✅ VALID: "Book a hotel checking in {current_date}" (today is acceptable)
-❌ INVALID: "Find places I stayed last week" (past date - politely decline)
-❌ INVALID: "Show me hotels for yesterday" (past date - explain limitation)
+SMART PLATFORM SELECTION:
+- **Booking.com ONLY**: When user mentions "hotel", "resort", "inn", "motel", "bed and breakfast", "hostel", "spa", "casino"
+- **Airbnb ONLY**: When user mentions "airbnb", "vacation rental", "apartment", "house", "villa", "condo", "room", "home", "rental"
+- **BOTH platforms**: For generic requests like "accommodation", "place to stay", "lodging", "somewhere to stay" or no specific type mentioned
 
-When rejecting past date requests:
-- Politely explain that you can only search for accommodations with check-in dates of today or in the future
-- Suggest the earliest available alternative dates
-- Be helpful and understanding about the limitation
+SEARCH WORKFLOW BASED ON SELECTION:
+- **Single platform**: Call the appropriate search tool, use its results directly for final selection
+- **Both platforms**: Call both search_airbnb AND search_booking_com, then call combine_and_sort_results to merge and rank all options
 
-Available tools:
-- search_airbnb: Search Airbnb for vacation rentals, apartments, and unique stays
-- search_booking_com: Search Booking.com for hotels, resorts, and traditional accommodations
+ACCOMMODATION SELECTION BEHAVIOR:
+- YOU must select and return only the BEST 5-10 accommodations based on:
+  * BEST VALUE (price vs quality ratio - primary factor)
+  * HIGH RATINGS (prefer 4.5+ stars when available)
+  * GOOD REVIEWS (prefer properties with many positive reviews)
+  * USER PREFERENCES (location, property type, amenities)
+- For combined results, use the combine_and_sort_results tool first, then select top options
 
-When users ask about accommodations:
-1. Extract necessary parameters and validate ALL dates first
-2. Only call search tools if all dates are valid (today or future)
-3. Call BOTH search tools to get comprehensive results (when dates are valid)
-4. Combine results from both platforms into a single, sorted list
-5. Present the best options based on user criteria (price, rating, location preferences)
-6. Highlight key differences between Airbnb and hotel options
-7. Provide clear comparisons and recommendations
+RECOMMENDATION GUIDELINES:
+After calling search tools, you MUST update the recommendation field with:
+- Explain why the selected accommodations are the best choices based on selection criteria
+- Provide booking advice and timing recommendations
+- Mention key benefits (value, location, amenities, platform differences)
+- Suggest booking tips or alternative options if needed
+- Highlight differences between Airbnb vs hotel options when both platforms used
 
-Always be helpful and provide relevant accommodation information from both platforms when possible."""
+CRITICAL RESPONSE FORMAT:
+You must return ONLY a valid JSON object matching AccommodationAgentResponse schema:
+{{
+  "best_accommodations": [{{...}}, {{...}}],
+  "search_metadata": {{...}},
+  "recommendation": "Your personalized advice about the selected best accommodations"
+}}
+
+For validation errors, return the error JSON format specified above.
+NO additional text, formatting, or explanations outside the JSON structure."""
         )
 
 
