@@ -9,7 +9,8 @@ and validating the responses and tool usage.
 import os
 import sys
 import json
-
+# Add project root to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 # Note: Environment variables are automatically loaded by venv/bin/activate
 
 def test_agent_execution():
@@ -130,7 +131,7 @@ def validate_agent_response(response, test_case):
     
     try:
         # Import Pydantic models for validation
-        from models.food_models import RestaurantSearchResults
+        from common.models.food_models import RestaurantSearchResults
         
         # Parse response if it's a string
         if isinstance(response, str):

@@ -2,6 +2,7 @@
 Memory hooks for AgentCore short-term memory integration
 """
 import logging
+import uuid
 from typing import List, Dict, Any
 from datetime import datetime
 
@@ -330,12 +331,14 @@ def generate_session_ids(user_id: str = None, conversation_start: datetime = Non
     if not conversation_start:
         conversation_start = datetime.now()
     
-    # Create session ID
+    # Create session ID with UUID suffix to meet AWS 33-character minimum requirement
     timestamp_suffix = conversation_start.strftime('%Y%m%d%H%M%S')
+    uuid_suffix = str(uuid.uuid4())[:8]  # First 8 characters of UUID
+    
     if user_id:
-        session_id = f"travel-{user_id}-{timestamp_suffix}"
+        session_id = f"travel-{user_id}-{timestamp_suffix}-{uuid_suffix}"
     else:
-        session_id = f"travel-session-{timestamp_suffix}"
+        session_id = f"travel-session-{timestamp_suffix}-{uuid_suffix}"
     
     # Create actor IDs for each agent in the system
     actor_ids = {

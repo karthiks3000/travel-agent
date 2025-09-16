@@ -9,10 +9,10 @@ __version__ = "0.1.0"
 __author__ = "Travel Agent Team"
 
 from .accommodation_agent import AccommodationAgent
-from .models.accommodation_models import PropertyResult, AccommodationSearchResults
+from common.models.accommodation_models import PropertyResult, AccommodationAgentResponse
 
 __all__ = [
     "AccommodationAgent",
     "PropertyResult", 
-    "AccommodationSearchResults"
+    "AccommodationAgentResponse"
 ]

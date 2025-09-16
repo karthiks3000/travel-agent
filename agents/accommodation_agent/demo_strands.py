@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from agents.accommodation_agent.accommodation_agent import agent as accommodation_agent
-from models.accommodation_models import AccommodationAgentResponse
+from common.models.accommodation_models import AccommodationAgentResponse
 
 
 def validate_json_response(response, test_name):

@@ -4,13 +4,15 @@ Accommodation Agent - Bedrock AgentCore implementation with Nova Act browser aut
 import os
 import sys
 import boto3
+import json
 from datetime import datetime, timedelta
 from strands import Agent, tool
 from typing import Optional, Dict, Any
 from bedrock_agentcore import BedrockAgentCoreApp
 
 from common.browser_wrapper import BrowserWrapper
-from models.accommodation_models import PlatformSearchResults, AccommodationAgentResponse
+from common.models.accommodation_models import PlatformSearchResults, AccommodationAgentResponse, PropertyResult
+from common.models.base_models import ValidationError
 
 # Module-level browser wrapper - initialized by AccommodationAgent
 browser_wrapper = None
@@ -311,8 +313,6 @@ def combine_and_sort_results(airbnb_results: Dict[str, Any],
         # Combine all properties
         all_properties = []
         
-        # Convert dictionary properties to objects for sorting
-        from models.accommodation_models import PropertyResult
         for prop_dict in airbnb_properties:
             if isinstance(prop_dict, dict):
                 all_properties.append(PropertyResult(**prop_dict))
@@ -438,9 +438,15 @@ Your process:
 
 CRITICAL WORKFLOW:
 1. Call validate_inputs(location, check_in, check_out, guests, rooms)
-2. If validation result shows "valid": false, return error JSON immediately:
-   {{"best_accommodations": [], "search_metadata": {{"error": "[validation error message]"}}, "recommendation": "Please correct the validation error and try again."}}
+2. If validation result shows "valid": false, return the EXACT SAME JSON format as validate_inputs tool:
+   {{"valid": false, "error": "[validation error message from tool]"}}
 3. If validation result shows "valid": true, INTELLIGENTLY select platform(s) based on user request:
+
+VALIDATION ERROR RESPONSE FORMAT:
+When validation fails, return the exact same format as the validate_inputs tool:
+{{"valid": false, "error": "specific error message"}}
+
+Do NOT return AccommodationAgentResponse format for validation errors - use the validation format above.
 
 SMART PLATFORM SELECTION:
 - **Booking.com ONLY**: When user mentions "hotel", "resort", "inn", "motel", "bed and breakfast", "hostel", "spa", "casino"
@@ -480,20 +486,93 @@ NO additional text, formatting, or explanations outside the JSON structure."""
         )
 
 
+def parse_agent_response(result) -> AccommodationAgentResponse:
+    """Parse agent response and return AccommodationAgentResponse object"""
+    try:
+        # Get content from the agent result
+        content = result.message.get('content')
+        
+        # Handle different content types - it might be a list of messages
+        if isinstance(content, list) and len(content) > 0:
+            # Extract the text content from the list
+            content_text = content[0].get('text', '') if isinstance(content[0], dict) else str(content[0])
+        elif isinstance(content, str):
+            content_text = content
+        else:
+            content_text = str(content)
+            
+        # Parse JSON string to dictionary
+        response_data = json.loads(content_text)
+        
+        # Check if this is a validation error response
+        if 'valid' in response_data and not response_data.get('valid', True):
+            # This is a validation error - create ValidationError object
+            validation_error = ValidationError(
+                valid=False,
+                error=response_data.get('error', 'Validation failed')
+            )
+            
+            return AccommodationAgentResponse(
+                best_accommodations=[],
+                search_metadata={"validation_error": response_data.get('error', 'Validation failed')},
+                recommendation=f"Validation Error: {response_data.get('error', 'Please check your search parameters and try again.')}",
+                validation_error=validation_error
+            )
+        
+        # Create AccommodationAgentResponse object from successful response
+        # Handle accommodation data
+        best_accommodations = []
+        if response_data.get('best_accommodations'):
+            try:
+                for accommodation_data in response_data['best_accommodations']:
+                    accommodation = PropertyResult(**accommodation_data)
+                    best_accommodations.append(accommodation)
+            except Exception as e:
+                print(f"Error creating accommodation objects: {e}")
+                best_accommodations = []
+        
+        accommodation_results = AccommodationAgentResponse(
+            best_accommodations=best_accommodations,
+            search_metadata=response_data.get('search_metadata', {}),
+            recommendation=response_data.get('recommendation', "No recommendation provided")
+        )
+        
+        return accommodation_results
+            
+    except json.JSONDecodeError as e:
+        # Handle JSON parsing errors
+        return AccommodationAgentResponse(
+            best_accommodations=[],
+            search_metadata={"error": f"Failed to parse JSON response: {str(e)}"},
+            recommendation="There was an error processing the search results. Please try again."
+        )
+    except Exception as e:
+        # Handle any other errors - include more debugging info
+        return AccommodationAgentResponse(
+            best_accommodations=[],
+            search_metadata={
+                "error": str(e),
+                "content_type": str(type(result.message.get('content'))),
+                "content_preview": str(result.message.get('content'))[:200] if result.message.get('content') else "None"
+            },
+            recommendation="An unexpected error occurred. Please try again."
+        )
+
+
 # Bedrock AgentCore integration
 app = BedrockAgentCoreApp()
 agent = AccommodationAgent()
 
 @app.entrypoint
-async def accommodation_agent_invocation(payload):
+def accommodation_agent_invocation(payload):
     """Accommodation agent entry point for AgentCore Runtime"""
     if "prompt" not in payload:
-        yield {"error": "Missing 'prompt' in payload"}
-        return
-    print('Starting accommodation search for prompt', payload['prompt'])
-    stream = agent.stream_async(payload["prompt"])
-    async for event in stream:
-        yield event
+        return {"error": "Missing 'prompt' in payload"}
+
+    result = agent(payload["prompt"])
+    
+    # Use the response parsing function
+    return parse_agent_response(result)
 
 
 if __name__ == "__main__":

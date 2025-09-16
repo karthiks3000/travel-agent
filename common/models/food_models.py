@@ -4,6 +4,7 @@ Pydantic models for restaurant search data structures
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from .base_models import ValidationError
 
 class RestaurantResult(BaseModel):
     """Individual restaurant result from Google Places API"""
@@ -25,6 +26,7 @@ class RestaurantSearchResults(BaseModel):
     search_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional search metadata")
     next_page_token: Optional[str] = Field(None, description="Token for next page of results")
     recommendation: str = Field(..., description="Agent's personalized recommendation and advice about the restaurant results")
+    validation_error: Optional[ValidationError] = Field(None, description="Validation error details if applicable")
 
 class RestaurantSearchParams(BaseModel):
     """Parameters for restaurant search"""

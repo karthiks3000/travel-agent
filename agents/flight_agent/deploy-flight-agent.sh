@@ -321,27 +321,22 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ]
         },
         {
-            "Version": "2012-10-17"		 	 	 ,
-            "Statement": [
-                {
-                    "Sid": "BedrockAgentCoreInBuiltToolsFullAccess",
-                    "Effect": "Allow",
-                    "Action": [
-                        "bedrock-agentcore:CreateBrowser",
-                        "bedrock-agentcore:ListBrowsers",
-                        "bedrock-agentcore:GetBrowser",
-                        "bedrock-agentcore:DeleteBrowser",
-                        "bedrock-agentcore:StartBrowserSession",
-                        "bedrock-agentcore:ListBrowserSessions",
-                        "bedrock-agentcore:GetBrowserSession",
-                        "bedrock-agentcore:StopBrowserSession",
-                        "bedrock-agentcore:UpdateBrowserStream",
-                        "bedrock-agentcore:ConnectBrowserAutomationStream",
-                        "bedrock-agentcore:ConnectBrowserLiveViewStream"
-                    ],
-                    "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:browser/*"
-                }
-            ]
+            "Sid": "BedrockAgentCoreInBuiltToolsFullAccess",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:CreateBrowser",
+                "bedrock-agentcore:ListBrowsers",
+                "bedrock-agentcore:GetBrowser",
+                "bedrock-agentcore:DeleteBrowser",
+                "bedrock-agentcore:StartBrowserSession",
+                "bedrock-agentcore:ListBrowserSessions",
+                "bedrock-agentcore:GetBrowserSession",
+                "bedrock-agentcore:StopBrowserSession",
+                "bedrock-agentcore:UpdateBrowserStream",
+                "bedrock-agentcore:ConnectBrowserAutomationStream",
+                "bedrock-agentcore:ConnectBrowserLiveViewStream"
+            ],
+            "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:browser/*"
         },
         {
             "Sid": "ParameterStoreAccess",

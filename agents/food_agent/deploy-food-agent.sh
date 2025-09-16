@@ -52,6 +52,35 @@ if [[ ! -f "food_agent.py" ]]; then
     exit 1
 fi
 
+# Copy common directory for deployment (temporary)
+if [[ -d "../../common" ]]; then
+    print_status "Copying common directory for deployment (temporary)..."
+    # Copy common directory from project root, excluding the circular symlink
+    cp -r ../../common . 2>/dev/null || {
+        # If copy fails due to circular symlink, copy files individually
+        mkdir -p common
+        cp ../../common/__init__.py common/ 2>/dev/null || true
+        cp ../../common/browser_wrapper.py common/ 2>/dev/null || true
+        cp ../../common/*.py common/ 2>/dev/null || true
+    }
+    print_status "Common directory copied successfully"
+else
+    print_error "Common directory not found at ../../common"
+    exit 1
+fi
+
+# Function to cleanup temporary files
+cleanup_temp_files() {
+    if [[ -d "common" ]]; then
+        print_status "Cleaning up temporary common directory..."
+        rm -rf common/
+        print_status "Temporary files cleaned up"
+    fi
+}
+
+# Set trap to cleanup on script exit (success or failure)
+trap cleanup_temp_files EXIT
+
 # Check AWS CLI with bookhood profile
 if ! aws sts get-caller-identity --profile $AWS_PROFILE >/dev/null 2>&1; then
     print_error "AWS CLI not configured with profile '$AWS_PROFILE'"

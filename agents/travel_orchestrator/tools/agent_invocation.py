@@ -3,12 +3,18 @@ Agent invocation tools for calling specialist agents via AgentCore Runtime
 """
 import os
 import json
+import re
+import ast
 import boto3
 import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from common.models.travel_models import AgentSearchResult, TravelInformation
+from common.models.travel_models import TravelInformation
+from common.models.flight_models import FlightSearchResults
+from common.models.accommodation_models import AccommodationAgentResponse
+from common.models.food_models import RestaurantSearchResults
+from common.models.orchestrator_models import AgentResponseParser
 
 
 class AgentInvoker:
@@ -39,16 +45,16 @@ class AgentInvoker:
         print(f"   • Connect timeout: 60 seconds")
         print(f"   • Max retry attempts: 3")
     
-    async def invoke_flight_agent(self, travel_request: str, session_id: str) -> AgentSearchResult:
+    def invoke_flight_agent(self, travel_request: str, session_id: str) -> Optional[FlightSearchResults]:
         """
-        Invoke flight specialist agent with natural language request
+        Invoke flight specialist agent and return structured FlightSearchResults
         
         Args:
             travel_request: Natural language travel request
             session_id: Session ID for context preservation
             
         Returns:
-            AgentSearchResult with flight search results
+            FlightSearchResults if successful, None otherwise
         """
         start_time = datetime.now()
         
@@ -58,56 +64,53 @@ class AgentInvoker:
                 "prompt": f"Help with this flight search request: {travel_request}"
             }).encode()
             
-            # Invoke the flight agent
+            # Invoke the flight agent (now returns Pydantic objects directly)
             response = self.agentcore_client.invoke_agent_runtime(
                 agentRuntimeArn=self.specialist_agents["flights"],
                 runtimeSessionId=session_id,
                 payload=payload
             )
+
+            print(f'✈️  Flight agent response received ({response.get("contentType", "unknown")})')
             
-            # Process response (fixed streaming logic)
-            result_data = self._process_response(response)
+            # Process response - expect direct Pydantic object
+            result_data = self._process_sync_response(response)
             processing_time = (datetime.now() - start_time).total_seconds()
             
-            # Handle both string and dictionary responses
-            if isinstance(result_data, str):
-                # Text response from specialist agent
-                is_successful = len(result_data.strip()) > 0 and "error" not in result_data.lower()
-                results = {"response_text": result_data, "agent_response_type": "text"}
-            elif isinstance(result_data, dict):
-                # JSON response
-                is_successful = result_data.get("success", True) and "error" not in result_data
-                results = result_data
-            else:
-                # Unexpected format
-                is_successful = False
-                results = {"error": f"Unexpected response format: {type(result_data)}"}
+            print(f"✈️  Flight agent processing time: {processing_time:.2f}s")
             
-            return AgentSearchResult(
-                agent_name="flight_agent",
-                search_type="flights",
-                results=results,
-                success=is_successful,
-                processing_time_seconds=processing_time,
-                result_count=1 if is_successful else 0
-            )
+            # Agent now returns FlightSearchResults directly
+            if isinstance(result_data, FlightSearchResults):
+                print(f"✅ Flight agent returned FlightSearchResults object")
+                return result_data
+            elif isinstance(result_data, dict) and "error" not in result_data:
+                # Fallback: try to create FlightSearchResults from dict
+                try:
+                    flight_results = FlightSearchResults(**result_data)
+                    print(f"✅ Created FlightSearchResults from response dict")
+                    return flight_results
+                except Exception as e:
+                    print(f"❌ Failed to create FlightSearchResults from dict: {e}")
+            else:
+                print(f"❌ Flight agent returned error or invalid format: {result_data}")
+            
+            return None
             
         except Exception as e:
             processing_time = (datetime.now() - start_time).total_seconds()
-            print(f"❌ Flight agent invocation failed: {str(e)}")
-            
-            return AgentSearchResult(
-                agent_name="flight_agent",
-                search_type="flights",
-                results={},
-                success=False,
-                error_message=str(e),
-                processing_time_seconds=processing_time
-            )
+            print(f"❌ Flight agent invocation failed after {processing_time:.2f}s: {str(e)}")
+            return None
     
-    async def invoke_accommodation_agent(self, travel_request: str, session_id: str) -> AgentSearchResult:
+    def invoke_accommodation_agent(self, travel_request: str, session_id: str) -> Optional[AccommodationAgentResponse]:
         """
-        Invoke accommodation specialist agent with natural language request
+        Invoke accommodation specialist agent and return structured AccommodationAgentResponse
+        
+        Args:
+            travel_request: Natural language travel request
+            session_id: Session ID for context preservation
+            
+        Returns:
+            AccommodationAgentResponse if successful, None otherwise
         """
         start_time = datetime.now()
         
@@ -122,137 +125,142 @@ class AgentInvoker:
                 payload=payload
             )
             
-            result_data = self._process_response(response)
+            print(f'🏨 Accommodation agent response received ({response.get("contentType", "unknown")})')
+            
+            # Process response - expect direct Pydantic object
+            result_data = self._process_sync_response(response)
             processing_time = (datetime.now() - start_time).total_seconds()
             
-            # Handle both string and dictionary responses
-            if isinstance(result_data, str):
-                # Text response from specialist agent
-                is_successful = len(result_data.strip()) > 0 and "error" not in result_data.lower()
-                results = {"response_text": result_data, "agent_response_type": "text"}
-            elif isinstance(result_data, dict):
-                # JSON response
-                is_successful = result_data.get("success", True) and "error" not in result_data
-                results = result_data
-            else:
-                # Unexpected format
-                is_successful = False
-                results = {"error": f"Unexpected response format: {type(result_data)}"}
+            print(f"🏨 Accommodation agent processing time: {processing_time:.2f}s")
             
-            return AgentSearchResult(
-                agent_name="accommodation_agent",
-                search_type="accommodations",
-                results=results,
-                success=is_successful,
-                processing_time_seconds=processing_time,
-                result_count=1 if is_successful else 0
-            )
+            # Agent now returns AccommodationAgentResponse directly
+            if isinstance(result_data, AccommodationAgentResponse):
+                print(f"✅ Accommodation agent returned AccommodationAgentResponse object")
+                return result_data
+            elif isinstance(result_data, dict) and "error" not in result_data:
+                # Fallback: try to create AccommodationAgentResponse from dict
+                try:
+                    accommodation_results = AccommodationAgentResponse(**result_data)
+                    print(f"✅ Created AccommodationAgentResponse from response dict")
+                    return accommodation_results
+                except Exception as e:
+                    print(f"❌ Failed to create AccommodationAgentResponse from dict: {e}")
+            else:
+                print(f"❌ Accommodation agent returned error or invalid format: {result_data}")
+            
+            return None
             
         except Exception as e:
             processing_time = (datetime.now() - start_time).total_seconds()
-            print(f"❌ Accommodation agent invocation failed: {str(e)}")
-            
-            return AgentSearchResult(
-                agent_name="accommodation_agent",
-                search_type="accommodations",
-                results={},
-                success=False,
-                error_message=str(e),
-                processing_time_seconds=processing_time
-            )
+            print(f"❌ Accommodation agent invocation failed after {processing_time:.2f}s: {str(e)}")
+            return None
     
-    async def invoke_food_agent(self, travel_request: str, session_id: str) -> AgentSearchResult:
+    def invoke_food_agent(self, travel_request: str, session_id: str) -> Optional[RestaurantSearchResults]:
         """
-        Invoke food/restaurant specialist agent with natural language request
+        Invoke food/restaurant specialist agent and return structured RestaurantSearchResults
+        
+        Args:
+            travel_request: Natural language travel request
+            session_id: Session ID for context preservation
+            
+        Returns:
+            RestaurantSearchResults if successful, None otherwise
         """
         start_time = datetime.now()
         
         try:
+            # Prepare payload for food agent
             payload = json.dumps({
                 "prompt": f"Help with this restaurant search request: {travel_request}"
             }).encode()
             
+            # Invoke the food agent (now returns Pydantic objects directly)
             response = self.agentcore_client.invoke_agent_runtime(
                 agentRuntimeArn=self.specialist_agents["restaurants"],
                 runtimeSessionId=session_id,
                 payload=payload
             )
+
+            print(f'🍽️  Restaurant agent response received ({response.get("contentType", "unknown")})')
             
-            result_data = self._process_response(response)
+            # Process response - expect direct Pydantic object
+            result_data = self._process_sync_response(response)
             processing_time = (datetime.now() - start_time).total_seconds()
             
-            # Handle both string and dictionary responses
-            if isinstance(result_data, str):
-                # Text response from specialist agent
-                is_successful = len(result_data.strip()) > 0 and "error" not in result_data.lower()
-                results = {"response_text": result_data, "agent_response_type": "text"}
-            elif isinstance(result_data, dict):
-                # JSON response
-                is_successful = result_data.get("success", True) and "error" not in result_data
-                results = result_data
-            else:
-                # Unexpected format
-                is_successful = False
-                results = {"error": f"Unexpected response format: {type(result_data)}"}
+            print(f"🍽️  Restaurant agent processing time: {processing_time:.2f}s")
             
-            return AgentSearchResult(
-                agent_name="food_agent",
-                search_type="restaurants",
-                results=results,
-                success=is_successful,
-                processing_time_seconds=processing_time,
-                result_count=1 if is_successful else 0
-            )
+            # Agent now returns RestaurantSearchResults directly
+            if isinstance(result_data, RestaurantSearchResults):
+                print(f"✅ Restaurant agent returned RestaurantSearchResults object")
+                return result_data
+            elif isinstance(result_data, dict) and "error" not in result_data:
+                # Fallback: try to create RestaurantSearchResults from dict
+                try:
+                    restaurant_results = RestaurantSearchResults(**result_data)
+                    print(f"✅ Created RestaurantSearchResults from response dict")
+                    return restaurant_results
+                except Exception as e:
+                    print(f"❌ Failed to create RestaurantSearchResults from dict: {e}")
+            else:
+                print(f"❌ Restaurant agent returned error or invalid format: {result_data}")
+            
+            return None
             
         except Exception as e:
             processing_time = (datetime.now() - start_time).total_seconds()
-            print(f"❌ Food agent invocation failed: {str(e)}")
-            
-            return AgentSearchResult(
-                agent_name="food_agent",
-                search_type="restaurants",
-                results={},
-                success=False,
-                error_message=str(e),
-                processing_time_seconds=processing_time
-            )
+            print(f"❌ Restaurant agent invocation failed after {processing_time:.2f}s: {str(e)}")
+            return None
     
-    async def invoke_parallel_agents(self, travel_request: str, session_id: str, 
-                                   agent_types: list = None) -> Dict[str, AgentSearchResult]:
+    def invoke_parallel_agents(self, travel_request: str, session_id: str, 
+                             agent_types: list = None) -> Dict[str, Any]:
         """
-        Invoke multiple specialist agents in parallel
+        Invoke multiple specialist agents in parallel and return structured responses
+        
+        Args:
+            travel_request: Natural language travel request
+            session_id: Session ID for context preservation
+            agent_types: List of agent types to invoke (flights, accommodations, restaurants)
+            
+        Returns:
+            Dict with keys 'flights', 'accommodations', 'restaurants' containing Pydantic models or None
         """
         if agent_types is None:
             agent_types = ["flights", "accommodations", "restaurants"]
         
-        tasks = []
+        import concurrent.futures
+        import threading
         
-        if "flights" in agent_types:
-            tasks.append(("flights", self.invoke_flight_agent(travel_request, session_id)))
-        
-        if "accommodations" in agent_types:
-            tasks.append(("accommodations", self.invoke_accommodation_agent(travel_request, session_id)))
-        
-        if "restaurants" in agent_types:
-            tasks.append(("restaurants", self.invoke_food_agent(travel_request, session_id)))
-        
-        # Execute all tasks in parallel
         results = {}
-        if tasks:
-            task_names, task_coroutines = zip(*tasks)
-            task_results = await asyncio.gather(*task_coroutines, return_exceptions=True)
+        
+        # Use ThreadPoolExecutor for concurrent execution of sync methods
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_agent = {}
             
-            for name, result in zip(task_names, task_results):
-                if isinstance(result, Exception):
-                    results[name] = AgentSearchResult(
-                        agent_name=f"{name}_agent",
-                        search_type=name,
-                        results={},
-                        success=False,
-                        error_message=str(result)
-                    )
-                else:
-                    results[name] = result
+            if "flights" in agent_types:
+                future = executor.submit(self.invoke_flight_agent, travel_request, f"{session_id}-flights")
+                future_to_agent[future] = "flights"
+            
+            if "accommodations" in agent_types:
+                future = executor.submit(self.invoke_accommodation_agent, travel_request, f"{session_id}-accommodations")
+                future_to_agent[future] = "accommodations"
+            
+            if "restaurants" in agent_types:
+                future = executor.submit(self.invoke_food_agent, travel_request, f"{session_id}-restaurants")
+                future_to_agent[future] = "restaurants"
+            
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_agent):
+                agent_name = future_to_agent[future]
+                try:
+                    result = future.result()
+                    results[agent_name] = result
+                    if result:
+                        print(f"✅ {agent_name} agent completed successfully")
+                    else:
+                        print(f"❌ {agent_name} agent returned no results")
+                except Exception as e:
+                    print(f"❌ {agent_name} agent failed with exception: {e}")
+                    results[agent_name] = None
         
         return results
     
@@ -264,6 +272,7 @@ class AgentInvoker:
         try:
             # Check for AgentCore body format first (preferred)
             if 'body' in response and 'output' in response['body']:
+                print('calling _parse_agentcore_body_format')
                 return self._parse_agentcore_body_format(response['body'])
             
             # Handle streaming response (AWS docs pattern with duplication fix)
@@ -280,9 +289,14 @@ class AgentInvoker:
                 if content_chunks:
                     final_chunk = content_chunks[-1]
                     print(f"✅ Using final streaming chunk ({len(final_chunk)} chars)")
+                    print(final_chunk)
                     try:
                         return json.loads(final_chunk)
                     except json.JSONDecodeError:
+                        # Try to extract JSON from AgentResult string format
+                        extracted_json = self._extract_json_from_agent_result(final_chunk)
+                        if extracted_json:
+                            return extracted_json
                         # If final chunk is not JSON, return as text response
                         return {"success": True, "response_text": final_chunk}
                 else:
@@ -334,6 +348,119 @@ class AgentInvoker:
             
         except Exception as e:
             return {"error": f"Failed to extract response: {str(e)}"}
+    
+    def _extract_json_from_agent_result(self, agent_result_string: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract JSON from AgentResult string format: AgentResult(..., message={'content': [{'text': '{JSON}'}]}, ...)
+        
+        Args:
+            agent_result_string: String representation of AgentResult object
+            
+        Returns:
+            Parsed JSON dictionary or None if extraction fails
+        """
+        try:
+            print(f"🔧 Attempting to extract JSON from AgentResult string ({len(agent_result_string)} chars)")
+            
+            # Look for the pattern: content': [{'text': '
+            content_pattern = r"content['\"]:\s*\[\s*\{\s*['\"]text['\"]:\s*['\"](.+?)['\"]"
+            match = re.search(content_pattern, agent_result_string, re.DOTALL)
+            
+            if match:
+                json_text = match.group(1)
+                print(f"✅ Found JSON text in content[0]['text'] ({len(json_text)} chars)")
+                
+                # The JSON might have escaped quotes, so we need to unescape them
+                json_text = json_text.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+                
+                try:
+                    parsed_json = json.loads(json_text)
+                    print(f"✅ Successfully parsed JSON from AgentResult")
+                    return parsed_json
+                except json.JSONDecodeError as e:
+                    print(f"❌ Failed to parse extracted JSON: {e}")
+                    return None
+            else:
+                print("❌ Could not find content[0]['text'] pattern in AgentResult string")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error extracting JSON from AgentResult: {e}")
+            return None
+    
+    def _process_sync_response(self, response: Dict[str, Any]) -> Any:
+        """
+        Process AgentCore Runtime response for sync agents that return Pydantic objects
+        
+        The agents now return Pydantic objects directly from their entrypoints.
+        AgentCore Runtime serializes these objects for transport.
+        This method deserializes them back to the original data structure.
+        
+        Args:
+            response: AgentCore Runtime response dictionary
+            
+        Returns:
+            Deserialized data structure that can be used to recreate Pydantic objects
+        """
+        try:
+            # Use existing response processing to extract the serialized data
+            # The agents return Pydantic objects, AgentCore serializes them, 
+            # and we get the serialized data back
+            extracted_data = self._process_response(response)
+            
+            # The extracted data should be the serialized Pydantic object
+            if isinstance(extracted_data, dict) and "error" not in extracted_data:
+                print(f"✅ Extracted serialized Pydantic object data")
+                return extracted_data
+            else:
+                print(f"❌ No valid data extracted from sync response")
+                return extracted_data
+            
+        except Exception as e:
+            print(f"❌ Error processing sync response: {str(e)}")
+            return {"error": f"Failed to process sync response: {str(e)}"}
+    
+    def _process_response_clean(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process AgentCore Runtime response expecting clean JSON from structured output agents
+        """
+        try:
+            # Handle streaming response - should be clean JSON now
+            if "text/event-stream" in response.get("contentType", ""):
+                content_chunks = []
+                for line in response["response"].iter_lines(chunk_size=10):
+                    if line:
+                        line = line.decode("utf-8")
+                        if line.startswith("data: "):
+                            chunk = line[6:]
+                            content_chunks.append(chunk)
+                
+                # Take the final chunk
+                if content_chunks:
+                    final_chunk = content_chunks[-1]
+                    print(f"✅ Using clean streaming chunk ({len(final_chunk)} chars)")
+                    try:
+                        # Should be clean JSON from structured output
+                        return json.loads(final_chunk)
+                    except json.JSONDecodeError as e:
+                        print(f"❌ Failed to parse clean JSON: {e}")
+                        return {"error": f"Invalid JSON from structured output: {e}"}
+                else:
+                    return {"error": "No streaming chunks received"}
+            
+            # Handle standard JSON response
+            elif response.get("contentType") == "application/json":
+                content = []
+                for chunk in response.get("response", []):
+                    content.append(chunk.decode('utf-8'))
+                return json.loads(''.join(content))
+            
+            else:
+                return {"error": f"Unsupported content type: {response.get('contentType')}"}
+                
+        except Exception as e:
+            print(f"⚠️  Error processing clean response: {str(e)}")
+            return {"error": f"Failed to process clean response: {str(e)}"}
 
 
 def format_travel_request(travel_info: TravelInformation) -> str:

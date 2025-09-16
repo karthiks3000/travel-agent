@@ -10,6 +10,9 @@ import os
 import sys
 import json
 from datetime import datetime, timedelta
+# Add project root to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+from agents.flight_agent.flight_agent import FlightAgent
 
 # Note: Environment variables are automatically loaded by venv/bin/activate
 
@@ -24,12 +27,6 @@ def test_agent_execution():
         raise ValueError("NOVA_ACT_API_KEY environment variable must be set for testing")
     
     print(f"✅ Nova Act API Key configured: {api_key[:10]}...")
-    
-    # Fail fast if dependencies are not available
-    try:
-        from flight_agent import FlightAgent
-    except ImportError as e:
-        raise ImportError(f"Failed to import FlightAgent - ensure dependencies are installed: {str(e)}")
     
     # Initialize the agent - fail fast if this fails
     agent = FlightAgent()
@@ -137,7 +134,7 @@ def validate_agent_response(response, test_case):
     
     try:
         # Import Pydantic models for validation
-        from models.flight_models import FlightSearchResults
+        from common.models.flight_models import FlightSearchResults
         
         # Parse response if it's a string
         if isinstance(response, str):

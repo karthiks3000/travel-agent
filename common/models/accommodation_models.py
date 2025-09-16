@@ -4,6 +4,7 @@ Pydantic models for accommodation search data structures
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+from .base_models import ValidationError
 
 class PropertyResult(BaseModel):
     """Individual property result from accommodation platforms"""
@@ -23,13 +24,6 @@ class PropertyResult(BaseModel):
     bedrooms: Optional[int] = Field(None, description="Number of bedrooms")
     bathrooms: Optional[int] = Field(None, description="Number of bathrooms")
     
-class AccommodationSearchResults(BaseModel):
-    """Complete accommodation search results from multiple platforms"""
-    airbnb_properties: List[PropertyResult] = Field(default_factory=list, description="Airbnb search results")
-    booking_properties: List[PropertyResult] = Field(default_factory=list, description="Booking.com search results")
-    combined_results: List[PropertyResult] = Field(default_factory=list, description="Combined and sorted results from all platforms")
-    search_metadata: dict = Field(default_factory=dict, description="Search metadata and parameters")
-
 class AccommodationSearchParams(BaseModel):
     """Parameters for accommodation search"""
     location: str = Field(..., description="Destination city or location")
@@ -68,3 +62,4 @@ class AccommodationAgentResponse(BaseModel):
     best_accommodations: List[PropertyResult] = Field(default_factory=list, description="Top 5-10 best accommodation options selected by agent based on price, rating, and user preferences")
     search_metadata: dict = Field(default_factory=dict, description="Search parameters and metadata including any errors")
     recommendation: str = Field(..., description="Agent's personalized accommodation recommendations and booking advice")
+    validation_error: Optional[ValidationError] = Field(None, description="Validation error details if applicable")

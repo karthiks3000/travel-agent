@@ -4,6 +4,7 @@ Pydantic models for flight search data structures
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+from .base_models import ValidationError
 
 class FlightResult(BaseModel):
     """Individual flight result from Google Flights"""
@@ -24,6 +25,7 @@ class FlightSearchResults(BaseModel):
     best_return_flight: Optional[FlightResult] = Field(None, description="Best selected return flight (if round-trip)")
     search_metadata: dict = Field(default_factory=dict, description="Additional search metadata")
     recommendation: str = Field(..., description="Agent's personalized flight recommendations and booking advice")
+    validation_error: Optional[ValidationError] = Field(None, description="Validation error details if applicable")
 
 class FlightSearchParams(BaseModel):
     """Parameters for flight search"""

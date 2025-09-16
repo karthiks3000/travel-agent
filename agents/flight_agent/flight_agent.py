@@ -4,16 +4,15 @@ Flight Agent - Bedrock AgentCore implementation with Nova Act browser automation
 import os
 import sys
 import boto3
+import json
 from datetime import datetime, timedelta
 from strands import Agent, tool
 from typing import Optional, Dict, Any
 from bedrock_agentcore import BedrockAgentCoreApp
 
-# Add project root to path for common imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-
 from common.browser_wrapper import BrowserWrapper
-from models.flight_models import FlightSearchResults
+from common.models.flight_models import FlightSearchResults, FlightResult
+from common.models.base_models import ValidationError
 
 # Module-level browser wrapper - initialized by FlightAgent
 browser_wrapper = None
@@ -47,6 +46,7 @@ def validate_inputs(origin: str, destination: str, departure_date: str,
         Dictionary with validation result: {"valid": bool, "error": str or None}
     """
     try:
+        print("Validating inputs")
         # Get current date
         today = datetime.now().date()
         
@@ -57,6 +57,9 @@ def validate_inputs(origin: str, destination: str, departure_date: str,
         # Validate origin and destination are different
         if origin.strip().lower() == destination.strip().lower():
             return {"valid": False, "error": "Origin and destination cannot be the same."}
+        
+        if origin.strip() == '' or destination.strip() == '':
+            return {"valid": False, "error": "Origin and destination are both required"}
         
         # Parse and validate departure date
         try:
@@ -236,9 +239,15 @@ Your process:
 
 CRITICAL WORKFLOW:
 1. Call validate_inputs(origin, destination, departure_date, return_date, passengers)
-2. If validation result shows "valid": false, return error JSON immediately:
-   {{"best_outbound_flight": null, "best_return_flight": null, "search_metadata": {{"error": "[validation error message]"}}, "recommendation": "Please correct the validation error and try again."}}
-3. If validation result shows "valid": true, proceed with search_google_flights using the same parameters
+2. If validation result shows "valid": false, return the EXACT SAME JSON format as validate_inputs tool:
+   {{"valid": false, "error": "[validation error message from tool]"}}
+3. If validation result shows "valid": true, proceed with search_google_flights using the same parameters and return FlightSearchResults format
+
+VALIDATION ERROR RESPONSE FORMAT:
+When validation fails, return the exact same format as the validate_inputs tool:
+{{"valid": false, "error": "specific error message"}}
+
+Do NOT return FlightSearchResults format for validation errors - use the validation format above.
 
 FLIGHT SELECTION BEHAVIOR:
 - The tool automatically selects the BEST flights (not multiple options)
@@ -267,20 +276,103 @@ NO additional text, formatting, or explanations outside the JSON structure."""
         )
 
 
+def parse_agent_response(result) -> FlightSearchResults:
+    """Parse agent response and return FlightSearchResults object"""
+    try:
+        # Get content from the agent result
+        content = result.message.get('content')
+        
+        # Handle different content types - it might be a list of messages
+        if isinstance(content, list) and len(content) > 0:
+            # Extract the text content from the list
+            content_text = content[0].get('text', '') if isinstance(content[0], dict) else str(content[0])
+        elif isinstance(content, str):
+            content_text = content
+        else:
+            content_text = str(content)
+            
+        # Parse JSON string to dictionary
+        response_data = json.loads(content_text)
+        
+        # Check if this is a validation error response
+        if 'valid' in response_data and not response_data.get('valid', True):
+            # This is a validation error - create ValidationError object
+            validation_error = ValidationError(
+                valid=False,
+                error=response_data.get('error', 'Validation failed')
+            )
+            
+            return FlightSearchResults(
+                best_outbound_flight=None,
+                best_return_flight=None,
+                search_metadata={"validation_error": response_data.get('error', 'Validation failed')},
+                recommendation=f"Validation Error: {response_data.get('error', 'Please check your input parameters and try again.')}",
+                validation_error=validation_error
+            )
+            
+        # Create FlightSearchResults object from successful response
+        # Handle validation errors where flight data might be null
+        best_outbound = None
+        if response_data.get('best_outbound_flight') and response_data['best_outbound_flight'] is not None:
+            try:
+                best_outbound = FlightResult(**response_data['best_outbound_flight'])
+            except Exception as e:
+                print(f"Error creating outbound flight object: {e}")
+                best_outbound = None
+                
+        best_return = None
+        if response_data.get('best_return_flight') and response_data['best_return_flight'] is not None:
+            try:
+                best_return = FlightResult(**response_data['best_return_flight'])
+            except Exception as e:
+                print(f"Error creating return flight object: {e}")
+                best_return = None
+        
+        flight_results = FlightSearchResults(
+            best_outbound_flight=best_outbound,
+            best_return_flight=best_return,
+            search_metadata=response_data.get('search_metadata', {}),
+            recommendation=response_data.get('recommendation', "No recommendation provided")
+        )
+        
+        return flight_results
+            
+    except json.JSONDecodeError as e:
+        # Handle JSON parsing errors
+        return FlightSearchResults(
+            best_outbound_flight=None,
+            best_return_flight=None,
+            search_metadata={"error": f"Failed to parse JSON response: {str(e)}"},
+            recommendation="There was an error processing the search results. Please try again."
+        )
+    except Exception as e:
+        # Handle any other errors - include more debugging info
+        return FlightSearchResults(
+            best_outbound_flight=None,
+            best_return_flight=None,
+            search_metadata={
+                "error": str(e),
+                "content_type": str(type(result.message.get('content'))),
+                "content_preview": str(result.message.get('content'))[:200] if result.message.get('content') else "None"
+            },
+            recommendation="An unexpected error occurred. Please try again."
+        )
+
+
 # Bedrock AgentCore integration
 app = BedrockAgentCoreApp()
 agent = FlightAgent()
 
 @app.entrypoint
-async def flight_agent_invocation(payload):
+def flight_agent_invocation(payload):
     """Flight agent entry point for AgentCore Runtime"""
     if "prompt" not in payload:
-        yield {"error": "Missing 'prompt' in payload"}
-        return
-    print('Starting search for prompt', payload['prompt'])
-    stream = agent.stream_async(payload["prompt"])
-    async for event in stream:
-        yield event
+        return {"error": "Missing 'prompt' in payload"}
+
+    result = agent(payload["prompt"])
+    
+    # Use the response parsing function
+    return parse_agent_response(result)
 
 
 if __name__ == "__main__":

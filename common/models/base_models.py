@@ -66,6 +66,21 @@ class BudgetCategory(str, Enum):
     MID_RANGE = "mid-range"
     LUXURY = "luxury"
 
+class ValidationError(BaseModel):
+    """Generic validation error model for all agents"""
+    valid: bool = Field(default=False, description="Whether validation passed")
+    error: Optional[str] = Field(None, description="Validation error message")
+    field_errors: Optional[Dict[str, str]] = Field(None, description="Field-specific error messages")
+    error_code: Optional[str] = Field(None, description="Error code for programmatic handling")
+    
+    def __str__(self) -> str:
+        if self.error:
+            return self.error
+        elif self.field_errors:
+            return f"Validation errors: {', '.join(f'{k}: {v}' for k, v in self.field_errors.items())}"
+        else:
+            return "Unknown validation error"
+
 class AgentResponseBase(BaseModel):
     """Base class for all agent responses"""
     agent_name: str = Field(..., description="Name of the agent that generated this response")
@@ -73,3 +88,4 @@ class AgentResponseBase(BaseModel):
     error_message: Optional[str] = Field(None, description="Error message if agent call failed")
     processing_time_seconds: Optional[float] = Field(None, description="Time taken to process the request")
     timestamp: datetime = Field(default_factory=datetime.now)
+    validation_error: Optional[ValidationError] = Field(None, description="Validation error details if applicable")
