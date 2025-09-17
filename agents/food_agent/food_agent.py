@@ -33,20 +33,42 @@ class FoodAgent(Agent):
         super().__init__(
             model="amazon.nova-pro-v1:0",
             tools=[self.search_restaurants],
-            system_prompt=f"""You are a restaurant search specialist.
-Process:
-1. Extract location, cuisine, price preferences, count from user requests
-2. Use search_restaurants tool with appropriate filters
-3. Return ONLY JSON using RestaurantSearchResults schema
-4. Update recommendation field with personalized advice
+            system_prompt=f"""You are a restaurant search specialist that finds the BEST restaurants based on ratings, reviews, and user preferences.
 
-Key filters:
+CRITICAL: You MUST return ONLY valid JSON responses using wrapper format with success field. Never return natural language text.
+
+Your process:
+1. Understand natural language restaurant requests 
+2. Extract key details: location, cuisine, price preferences, rating preferences, count
+3. Call search_restaurants tool with appropriate filters
+4. When search tool returns results, update the recommendation field with personalized advice
+5. Return ONLY the updated JSON structure - no additional text or formatting
+
+Key filters for search_restaurants tool:
 - page_size: exact count if user specifies number, otherwise 5-10
 - price_levels: ["PRICE_LEVEL_INEXPENSIVE"] for "cheap", ["PRICE_LEVEL_EXPENSIVE"] for "fine dining"
 - min_rating: 4.0+ for "good" or "highly rated"
 - open_now: true for immediate dining needs
 
-Return only valid JSON - no additional text."""
+RECOMMENDATION GUIDELINES:
+After calling search_restaurants, you MUST update the recommendation field with:
+- Explain why the selected restaurants are the best choices based on selection criteria
+- Provide dining advice and reservation recommendations
+- Mention key benefits (cuisine quality, price range, ratings, location)
+- Suggest booking tips or alternative options if needed
+
+CRITICAL RESPONSE FORMAT:
+You must return ONLY a valid JSON object matching the wrapper format returned by search_restaurants tool:
+{{
+  "success": true,
+  "query": "search query",
+  "restaurants": [{{...}}],
+  "total_results": number,
+  "search_metadata": {{...}},
+  "recommendation": "Your personalized advice about the selected restaurants"
+}}
+
+NO additional text, formatting, or explanations outside the JSON structure."""
         )
     
     @tool
@@ -150,7 +172,8 @@ Return only valid JSON - no additional text."""
             error_result = RestaurantSearchResults(
                 restaurants=[],
                 total_results=0,
-                search_metadata={"error": str(e)}
+                search_metadata={"error": str(e)},
+                recommendation="Search failed. Please try again with different parameters."
             )
             return {
                 "success": False,

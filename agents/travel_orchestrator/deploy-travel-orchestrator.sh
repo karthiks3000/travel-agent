@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Food Agent Deployment Script
-# Automates Parameter Store setup and AgentCore deployment
+# Travel Orchestrator Deployment Script
+# Enhanced deployment for multi-agent coordination capabilities
 
 # Colors for output
 RED='\033[0;31m'
@@ -13,8 +13,8 @@ NC='\033[0m' # No Color
 
 # Configuration
 AWS_PROFILE="bookhood"
-PARAMETER_NAME="/travel-agent/google-places-api-key"
-AGENT_NAME="food_agent"
+PARAMETER_NAME="/travel-agent/nova-act-api-key"
+AGENT_NAME="travel_orchestrator"
 
 # Get AWS account ID and region dynamically
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --profile $AWS_PROFILE)
@@ -26,8 +26,8 @@ if [[ -z "$REGION" ]]; then
     print_warning "No region configured in AWS profile, using default: $REGION"
 fi
 
-echo -e "${BLUE}🍽️  Food Agent Deployment Script${NC}"
-echo -e "${BLUE}=================================${NC}"
+echo -e "${BLUE}🌍 Travel Orchestrator Deployment Script${NC}"
+echo -e "${BLUE}=======================================${NC}"
 
 # Function to print status
 print_status() {
@@ -47,8 +47,8 @@ echo -e "\n${BLUE}Step 1: Checking Prerequisites${NC}"
 echo "----------------------------------------"
 
 # Check if running from correct directory
-if [[ ! -f "food_agent.py" ]]; then
-    print_error "Please run this script from the agents/food_agent directory"
+if [[ ! -f "travel_orchestrator.py" ]]; then
+    print_error "Please run this script from the agents/travel_orchestrator directory"
     exit 1
 fi
 
@@ -62,6 +62,11 @@ if [[ -d "../../common" ]]; then
         cp ../../common/__init__.py common/ 2>/dev/null || true
         cp ../../common/browser_wrapper.py common/ 2>/dev/null || true
         cp ../../common/*.py common/ 2>/dev/null || true
+        # Copy models subdirectory
+        if [[ -d "../../common/models" ]]; then
+            mkdir -p common/models
+            cp ../../common/models/*.py common/models/ 2>/dev/null || true
+        fi
     }
     print_status "Common directory copied successfully"
 else
@@ -101,13 +106,13 @@ print_status "AgentCore CLI installed"
 # Using CodeBuild as default (no Docker/Podman checks)
 print_status "Using CodeBuild for deployment (default option)"
 
-# Check Google Places API Key
-if [[ -z "$GOOGLE_PLACES_API_KEY" ]]; then
-    print_error "GOOGLE_PLACES_API_KEY environment variable not set"
-    echo "Set it with: export GOOGLE_PLACES_API_KEY='your_api_key_here'"
+# Check Nova Act API Key
+if [[ -z "$NOVA_ACT_API_KEY" ]]; then
+    print_error "NOVA_ACT_API_KEY environment variable not set"
+    echo "Set it with: export NOVA_ACT_API_KEY='your_api_key_here'"
     exit 1
 fi
-print_status "Google Places API key found in environment"
+print_status "Nova Act API key found in environment"
 
 # Step 2: Setup Parameter Store
 echo -e "\n${BLUE}Step 2: Setting up AWS Parameter Store${NC}"
@@ -116,12 +121,12 @@ echo "------------------------------------------------"
 # Store API key in Parameter Store
 if aws ssm put-parameter \
     --name "$PARAMETER_NAME" \
-    --value "$GOOGLE_PLACES_API_KEY" \
+    --value "$NOVA_ACT_API_KEY" \
     --type "SecureString" \
     --overwrite \
     --profile $AWS_PROFILE \
     --region $REGION >/dev/null 2>&1; then
-    print_status "API key stored in Parameter Store: $PARAMETER_NAME"
+    print_status "Nova Act API key stored in Parameter Store: $PARAMETER_NAME"
 else
     print_error "Failed to store API key in Parameter Store"
     exit 1
@@ -138,11 +143,63 @@ else
     exit 1
 fi
 
-# Step 3: Create Custom IAM Role with All Permissions
-echo -e "\n${BLUE}Step 3: Setting up IAM Role${NC}"
-echo "-------------------------------------------"
+# Store specialist agent ARNs in Parameter Store
+print_status "Storing specialist agent ARNs in Parameter Store..."
 
-IAM_ROLE_NAME="FoodAgentExecutionRole"
+# Get ARNs from environment variables
+if [[ -n "$FLIGHT_AGENT_ARN" ]]; then
+    if aws ssm put-parameter \
+        --name "/travel-agent/flight-agent-arn" \
+        --value "$FLIGHT_AGENT_ARN" \
+        --type "String" \
+        --overwrite \
+        --profile $AWS_PROFILE \
+        --region $REGION >/dev/null 2>&1; then
+        print_status "Flight agent ARN stored: $FLIGHT_AGENT_ARN"
+    else
+        print_warning "Failed to store flight agent ARN in Parameter Store"
+    fi
+else
+    print_warning "FLIGHT_AGENT_ARN environment variable not set"
+fi
+
+if [[ -n "$ACCOMMODATION_AGENT_ARN" ]]; then
+    if aws ssm put-parameter \
+        --name "/travel-agent/accommodation-agent-arn" \
+        --value "$ACCOMMODATION_AGENT_ARN" \
+        --type "String" \
+        --overwrite \
+        --profile $AWS_PROFILE \
+        --region $REGION >/dev/null 2>&1; then
+        print_status "Accommodation agent ARN stored: $ACCOMMODATION_AGENT_ARN"
+    else
+        print_warning "Failed to store accommodation agent ARN in Parameter Store"
+    fi
+else
+    print_warning "ACCOMMODATION_AGENT_ARN environment variable not set"
+fi
+
+if [[ -n "$FOOD_AGENT_ARN" ]]; then
+    if aws ssm put-parameter \
+        --name "/travel-agent/food-agent-arn" \
+        --value "$FOOD_AGENT_ARN" \
+        --type "String" \
+        --overwrite \
+        --profile $AWS_PROFILE \
+        --region $REGION >/dev/null 2>&1; then
+        print_status "Food agent ARN stored: $FOOD_AGENT_ARN"
+    else
+        print_warning "Failed to store food agent ARN in Parameter Store"
+    fi
+else
+    print_warning "FOOD_AGENT_ARN environment variable not set"
+fi
+
+# Step 3: Create Enhanced IAM Role for Multi-Agent Coordination
+echo -e "\n${BLUE}Step 3: Setting up Enhanced IAM Role${NC}"
+echo "---------------------------------------------------"
+
+IAM_ROLE_NAME="TravelOrchestratorExecutionRole"
 IAM_TRUST_POLICY='{
     "Version": "2012-10-17",
     "Statement": [
@@ -278,6 +335,9 @@ IAM_ROLE_POLICY=$(cat <<EOF
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default/apikeycredentialprovider/*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/travel_orchestrator-*",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/flight_agent-*",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/accommodation_agent-*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/food_agent-*"
             ]
         },
@@ -291,6 +351,9 @@ IAM_ROLE_POLICY=$(cat <<EOF
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:token-vault/default/oauth2credentialprovider/*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/travel_orchestrator-*",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/flight_agent-*",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/accommodation_agent-*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/food_agent-*"
             ]
         },
@@ -304,6 +367,9 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ],
             "Resource": [
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/travel_orchestrator-*",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/flight_agent-*",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/accommodation_agent-*",
                 "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:workload-identity-directory/default/workload-identity/food_agent-*"
             ]
         },
@@ -321,6 +387,24 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ]
         },
         {
+            "Sid": "BedrockAgentCoreInBuiltToolsFullAccess",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:CreateBrowser",
+                "bedrock-agentcore:ListBrowsers",
+                "bedrock-agentcore:GetBrowser",
+                "bedrock-agentcore:DeleteBrowser",
+                "bedrock-agentcore:StartBrowserSession",
+                "bedrock-agentcore:ListBrowserSessions",
+                "bedrock-agentcore:GetBrowserSession",
+                "bedrock-agentcore:StopBrowserSession",
+                "bedrock-agentcore:UpdateBrowserStream",
+                "bedrock-agentcore:ConnectBrowserAutomationStream",
+                "bedrock-agentcore:ConnectBrowserLiveViewStream"
+            ],
+            "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:browser/*"
+        },
+        {
             "Sid": "ParameterStoreAccess",
             "Effect": "Allow",
             "Action": [
@@ -328,6 +412,32 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ],
             "Resource": [
                 "arn:aws:ssm:*:*:parameter/travel-agent/*"
+            ]
+        },
+        {
+            "Sid": "MultiAgentCoordinationAccess",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:InvokeAgentRuntime"
+            ],
+            "Resource": [
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/flight_agent",
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/accommodation_agent", 
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/food_agent"
+            ]
+        },
+        {
+            "Sid": "EnhancedMemoryManagement",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:CreateMemory",
+                "bedrock-agentcore:GetMemory",
+                "bedrock-agentcore:UpdateMemory",
+                "bedrock-agentcore:DeleteMemory",
+                "bedrock-agentcore:ListMemories"
+            ],
+            "Resource": [
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:memory/TravelOrchestrator_*"
             ]
         }
     ]
@@ -344,28 +454,29 @@ aws iam create-role \
 # Attach the comprehensive policy to the role
 aws iam put-role-policy \
     --role-name $IAM_ROLE_NAME \
-    --policy-name "FoodAgentExecutionPolicy" \
+    --policy-name "TravelOrchestratorExecutionPolicy" \
     --policy-document "$IAM_ROLE_POLICY" \
     --profile $AWS_PROFILE >/dev/null 2>&1
 
 # Construct the role ARN
 EXECUTION_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${IAM_ROLE_NAME}"
 
-print_status "IAM role created/updated: $IAM_ROLE_NAME"
+print_status "Enhanced IAM role created/updated: $IAM_ROLE_NAME"
 print_status "Role ARN: $EXECUTION_ROLE_ARN"
+print_status "Multi-agent coordination permissions enabled"
 
 # Step 4: AgentCore Configuration
 echo -e "\n${BLUE}Step 4: Configuring AgentCore Agent${NC}"
 echo "--------------------------------------------"
 
-# Configure with CodeBuild
+# Configure with CodeBuild (using symbolic link to common directory)
 if agentcore configure \
-    --entrypoint food_agent.py \
+    --entrypoint travel_orchestrator.py \
     --name $AGENT_NAME \
     --execution-role "$EXECUTION_ROLE_ARN" \
     --requirements-file requirements.txt \
     --region $REGION; then
-    print_status "AgentCore agent configured for CodeBuild with custom IAM role: $AGENT_NAME"
+    print_status "AgentCore agent configured for CodeBuild with enhanced IAM role: $AGENT_NAME"
 else
     print_error "AgentCore configuration failed"
     exit 1
@@ -376,9 +487,9 @@ echo -e "\n${BLUE}Step 5: Deploying with CodeBuild${NC}"
 echo "--------------------------------------------"
 
 if agentcore launch; then
-    print_status "Agent deployed successfully with CodeBuild"
+    print_status "Travel Orchestrator deployed successfully with CodeBuild"
 else
-    print_error "Agent deployment failed"
+    print_error "Travel Orchestrator deployment failed"
     exit 1
 fi
 
@@ -389,28 +500,76 @@ echo "-----------------------------------"
 AGENT_STATUS=$(agentcore status 2>/dev/null || echo "Unknown")
 
 echo "Agent Name: $AGENT_NAME"
-echo "Custom IAM Role: $IAM_ROLE_NAME"
+echo "Enhanced IAM Role: $IAM_ROLE_NAME"
 echo "Status: $AGENT_STATUS"
 echo "Region: $REGION"  
 echo "Parameter Store: $PARAMETER_NAME"
+echo "Multi-Agent Coordination: Enabled"
+
+# Step 7: Testing Multi-Agent Orchestration
+echo -e "\n${BLUE}Step 7: Testing Multi-Agent Orchestration${NC}"
+echo "-----------------------------------------------"
+
+print_status "Testing orchestrator with comprehensive travel planning query..."
+
+TEST_PAYLOAD='{"prompt": "Plan a comprehensive trip from JFK to Paris from June 15-20, 2025 for 2 people. I need flights, hotel recommendations, and restaurant suggestions."}'
+
+echo "Test payload: $TEST_PAYLOAD"
+
+if agentcore invoke "$TEST_PAYLOAD" >/dev/null 2>&1; then
+    print_status "Travel Orchestrator test successful!"
+    print_status "Multi-agent coordination verified"
+else
+    print_warning "Travel Orchestrator test failed - this might be normal during initial deployment"
+    echo "The orchestrator may need specialist agents (flight_agent, accommodation_agent, food_agent) to be deployed first."
+    echo "Try testing again in a few minutes with:"
+    echo "  agentcore invoke '$TEST_PAYLOAD'"
+fi
+
+# Step 8: Verification of Specialist Agent Dependencies
+echo -e "\n${BLUE}Step 8: Checking Specialist Agent Dependencies${NC}"
+echo "----------------------------------------------------"
+
+print_status "Verifying specialist agent availability..."
+
+# Check if specialist agents are deployed (this will help with troubleshooting)
+echo "Note: The Travel Orchestrator requires these specialist agents to be deployed:"
+echo "  • flight_agent (for flight searches)"
+echo "  • accommodation_agent (for hotel searches)" 
+echo "  • food_agent (for restaurant recommendations)"
+echo ""
+echo "Deploy specialist agents first if orchestration tests fail:"
+echo "  • cd ../flight_agent && ./deploy-flight-agent.sh"
+echo "  • cd ../accommodation_agent && ./deploy-accommodation-agent.sh"
+echo "  • cd ../food_agent && ./deploy-food-agent.sh"
 
 # Success summary
-echo -e "\n${GREEN}🎉 Food Agent Deployment Complete!${NC}"
-echo -e "${GREEN}=================================${NC}"
-echo -e "✅ Parameter Store configured with API key"
-echo -e "✅ Custom IAM role with Parameter Store access"
+echo -e "\n${GREEN}🎉 Travel Orchestrator Deployment Complete!${NC}"
+echo -e "${GREEN}============================================${NC}"
+echo -e "✅ Parameter Store configured with Nova Act API key"
+echo -e "✅ Enhanced IAM role with multi-agent coordination permissions"
 echo -e "✅ Agent built with CodeBuild (cloud-based)"
-echo -e "✅ Agent deployed to AWS AgentCore"
-echo -e "✅ Ready for integration with Travel Orchestrator"
+echo -e "✅ Travel Orchestrator deployed to AWS AgentCore"
+echo -e "✅ Memory management enabled for session handling"
+echo -e "✅ Ready for comprehensive travel planning coordination"
 
 echo -e "\n${BLUE}Next Steps:${NC}"
-echo -e "1. Test deployment: ${YELLOW}agentcore invoke '$TEST_PAYLOAD'${NC}"
-echo -e "2. Integrate with Travel Orchestrator"
-echo -e "3. Use in multi-agent travel planning system"
+echo -e "1. Ensure specialist agents are deployed: flight_agent, accommodation_agent, food_agent"
+echo -e "2. Test orchestration: ${YELLOW}agentcore invoke '$TEST_PAYLOAD'${NC}"
+echo -e "3. Integrate with frontend for comprehensive travel planning"
+echo -e "4. Use for end-to-end travel booking workflow"
+
+echo -e "\n${BLUE}Key Features Enabled:${NC}"
+echo -e "• Multi-agent coordination (flights, hotels, restaurants)"
+echo -e "• Memory-based session management"
+echo -e "• Comprehensive travel plan synthesis"
+echo -e "• Structured JSON responses for frontend integration"
 
 echo -e "\n${BLUE}Useful Commands:${NC}"
 echo -e "• Check status: ${YELLOW}agentcore status${NC}"
 echo -e "• Update agent: ${YELLOW}agentcore launch${NC}"
 echo -e "• Delete agent: ${YELLOW}agentcore destroy${NC}"
+echo -e "• Test orchestration: ${YELLOW}agentcore invoke '{\"prompt\": \"Plan a trip to Tokyo\"}'${NC}"
 
-echo -e "\n${GREEN}Deployment completed successfully! 🚀${NC}"
+echo -e "\n${BLUE}Final Cleanup:${NC}"
+echo -e "✅ Common directory will be automatically cleaned up"

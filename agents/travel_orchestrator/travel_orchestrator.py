@@ -76,8 +76,21 @@ class TravelOrchestratorAgent(Agent):
         
         logger.info(f"Initializing Travel Orchestrator - Session: {session_id}, Actor: {actor_id}")
         
-        # Initialize agent invoker for specialist agents
-        self.agent_invoker = AgentInvoker()
+        # Get specialist agent ARNs from Parameter Store
+        flight_agent_arn = self._get_specialist_agent_arn('FLIGHT_AGENT_ARN', '/travel-agent/flight-agent-arn')
+        accommodation_agent_arn = self._get_specialist_agent_arn('ACCOMMODATION_AGENT_ARN', '/travel-agent/accommodation-agent-arn')
+        food_agent_arn = self._get_specialist_agent_arn('FOOD_AGENT_ARN', '/travel-agent/food-agent-arn')
+        
+        # Initialize agent invoker with specialist agent ARNs
+        self.agent_invoker = AgentInvoker(
+            flight_agent_arn=flight_agent_arn,
+            accommodation_agent_arn=accommodation_agent_arn,
+            food_agent_arn=food_agent_arn,
+            region=region
+        )
+        if self.agent_invoker:
+            logger.info(f"AgentInvoker initialized")
+
         
         # Initialize memory if enabled
         memory_hooks = None
@@ -111,6 +124,40 @@ class TravelOrchestratorAgent(Agent):
             hooks=[memory_hooks] if memory_hooks else [],
             state=agent_state
         )
+    
+    def _get_specialist_agent_arn(self, env_var_name: str, ssm_parameter_name: str) -> str:
+        """
+        Get specialist agent ARN with fallback strategy:
+        1. Try SSM Parameter Store (for deployed environment)
+        2. Fall back to environment variable (for local development)  
+        3. Fall back to placeholder ARN (for error handling)
+        
+        Args:
+            env_var_name: Environment variable name (e.g., 'FLIGHT_AGENT_ARN')
+            ssm_parameter_name: SSM parameter name (e.g., '/travel-agent/flight-agent-arn')
+            
+        Returns:
+            Agent ARN string
+        """
+        # Try SSM Parameter Store first (for deployed environment)
+        try:
+            arn = get_parameter(ssm_parameter_name)
+            if arn:
+                logger.info(f"✅ Retrieved {env_var_name} from SSM: {arn}")
+                return arn
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to retrieve {ssm_parameter_name} from SSM: {e}")
+        
+        # Fall back to environment variable (for local development)
+        arn = os.getenv(env_var_name)
+        if arn:
+            logger.info(f"✅ Retrieved {env_var_name} from environment: {arn}")
+            return arn
+        
+        # Final fallback - placeholder ARN (will cause invocation to fail but with clear error)
+        placeholder_arn = f"arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/{env_var_name.lower().replace('_', '-')}-NOT-CONFIGURED"
+        logger.error(f"❌ Could not retrieve {env_var_name} from SSM or environment. Using placeholder: {placeholder_arn}")
+        return placeholder_arn
     
     def _build_system_prompt(self, current_datetime: str, current_date: str) -> str:
         """Build comprehensive system prompt for travel orchestration"""
@@ -399,6 +446,8 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
         try:
             # Use simplified agent invocation (now returns Pydantic models directly - sync call)
             restaurant_results = self.agent_invoker.invoke_food_agent(travel_request, session_id)
+
+            print(f"Food Agent Results: {restaurant_results}")
             
             processing_time = (datetime.now() - start_time).total_seconds()
             

@@ -20,7 +20,7 @@ from common.models.orchestrator_models import AgentResponseParser
 class AgentInvoker:
     """Handles invocation of specialist agents via AgentCore Runtime"""
     
-    def __init__(self):
+    def __init__(self, flight_agent_arn: str, accommodation_agent_arn: str, food_agent_arn: str, region: str = 'us-east-1'):
         from botocore.config import Config
         
         # Configure client with increased timeouts for browser automation agents
@@ -28,22 +28,28 @@ class AgentInvoker:
             retries={'max_attempts': 3, 'mode': 'adaptive'},
             read_timeout=400,  # 3 minutes for browser automation
             connect_timeout=60,  # 1 minute connection timeout
-            max_pool_connections=10
+            max_pool_connections=10,
+            region_name=region
         )
         
         self.agentcore_client = boto3.client('bedrock-agentcore', config=config)
         
-        # Get agent ARNs from environment variables with fallbacks
+        # Store specialist agent ARNs passed from main class
         self.specialist_agents = {
-            "flights": os.getenv('FLIGHT_AGENT_ARN', 'arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/flight-agent'),
-            "accommodations": os.getenv('ACCOMMODATION_AGENT_ARN', 'arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/accommodation-agent'), 
-            "restaurants": os.getenv('FOOD_AGENT_ARN', 'arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/food-agent')
+            "flights": flight_agent_arn,
+            "accommodations": accommodation_agent_arn, 
+            "restaurants": food_agent_arn
         }
         
         print("🔧 AgentInvoker initialized with enhanced timeout configuration:")
-        print(f"   • Read timeout: 180 seconds (for browser automation)")
+        print(f"   • Read timeout: 400 seconds (for browser automation)")
         print(f"   • Connect timeout: 60 seconds")
         print(f"   • Max retry attempts: 3")
+        print(f"   • Region: {region}")
+        print("🎯 Specialist agent ARNs loaded:")
+        print(f"   • Flight agent: {flight_agent_arn}")
+        print(f"   • Accommodation agent: {accommodation_agent_arn}")
+        print(f"   • Food agent: {food_agent_arn}")
     
     def invoke_flight_agent(self, travel_request: str, session_id: str) -> Optional[FlightSearchResults]:
         """
