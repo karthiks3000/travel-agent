@@ -72,21 +72,17 @@ NO additional text, formatting, or explanations outside the JSON structure."""
         )
     
     @tool
-    def search_restaurants(self, text_query: str, location_bias: Optional[Dict[str, Any]] = None,
-                          price_levels: Optional[List[str]] = None, min_rating: Optional[float] = None,
-                          open_now: Optional[bool] = None, included_type: Optional[str] = None,
-                          page_size: Optional[int] = None) -> Dict[str, Any]:
+    def search_restaurants(self, text_query: str, price_levels: Optional[List[str]] = None, min_rating: Optional[float] = None,
+                          open_now: Optional[bool] = None, included_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Search restaurants using Google Places API
         
         Args:
             text_query: Restaurant search query (e.g., "Italian restaurants in Rome")
-            location_bias: Location preference (optional)
             price_levels: Price filters (INEXPENSIVE, MODERATE, EXPENSIVE, VERY_EXPENSIVE)
             min_rating: Minimum rating filter (0.0 to 5.0)
             open_now: Filter for currently open restaurants
             included_type: Venue type filter (restaurant, cafe, bar)
-            page_size: Number of results (1-20)
         
         Returns:
             Restaurant search results dictionary
@@ -110,8 +106,6 @@ NO additional text, formatting, or explanations outside the JSON structure."""
             # Build request body with optional parameters
             request_body = {"textQuery": text_query}
             
-            if location_bias:
-                request_body["locationBias"] = location_bias
             if price_levels:
                 request_body["priceLevels"] = price_levels
             if min_rating is not None:
