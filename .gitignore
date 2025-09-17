@@ -7,3 +7,18 @@ __pycache__
 .bedrock_agentcore.yaml
 agents/travel_orchestrator/common
 .env
+frontend/.prettierignore
+.gitignore
+.gitkeep
+
+# CDK
+cdk/node_modules/
+cdk/cdk.out/
+cdk/.cdk.staging/
+cdk/coverage/
+cdk/*.js
+cdk/*.d.ts
+cdk/!jest.config.js
+
+frontend/.env.development
+frontend/.prettierrc

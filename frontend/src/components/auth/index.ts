@@ -1,0 +1,6 @@
+/**
+ * Authentication components exports
+ */
+
+export { SignUpForm } from './SignUpForm';
+export { SignInForm } from './SignInForm';
