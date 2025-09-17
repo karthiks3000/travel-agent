@@ -27,6 +27,25 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         
         try {
+          // First check if user is already authenticated
+          const [existingUser, existingTokens] = await Promise.all([
+            cognitoService.getCurrentUser(),
+            cognitoService.getTokens(),
+          ]);
+
+          if (existingUser && existingTokens) {
+            // User is already signed in, update state and return
+            set({
+              user: existingUser,
+              tokens: existingTokens,
+              isAuthenticated: true,
+              isLoading: false,
+              error: null,
+            });
+            return;
+          }
+
+          // Proceed with sign in if not already authenticated
           const result = await cognitoService.signIn({ email, password });
           
           if (result.isSignedIn) {
@@ -51,6 +70,53 @@ export const useAuthStore = create<AuthStore>()(
             });
           }
         } catch (error) {
+          // Check if the error is about already being signed in
+          if (error instanceof Error && error.message.includes('already a signed in user')) {
+            // Try to get current user info
+            try {
+              const [user, tokens] = await Promise.all([
+                cognitoService.getCurrentUser(),
+                cognitoService.getTokens(),
+              ]);
+
+              if (user && tokens) {
+                set({
+                  user,
+                  tokens,
+                  isAuthenticated: true,
+                  isLoading: false,
+                  error: null,
+                });
+                return;
+              }
+            } catch (getUserError) {
+              // If we can't get user info, sign out and try again
+              try {
+                await cognitoService.signOut();
+                // Retry the sign in
+                const retryResult = await cognitoService.signIn({ email, password });
+                
+                if (retryResult.isSignedIn) {
+                  const [user, tokens] = await Promise.all([
+                    cognitoService.getCurrentUser(),
+                    cognitoService.getTokens(),
+                  ]);
+
+                  set({
+                    user,
+                    tokens,
+                    isAuthenticated: true,
+                    isLoading: false,
+                    error: null,
+                  });
+                  return;
+                }
+              } catch (retryError) {
+                // Fall through to error handling
+              }
+            }
+          }
+
           set({
             isLoading: false,
             error: error instanceof Error ? error.message : 'Sign in failed',

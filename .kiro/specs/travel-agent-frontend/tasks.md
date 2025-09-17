@@ -68,40 +68,46 @@
     - Include redirect logic for authenticated users
     - _Requirements: 1.3, 1.4, 1.6_
 
-- [ ] 6. Chat Interface Foundation
-  - [ ] 6.1 Create split-panel layout structure
-    - Implement responsive ChatLayout with left and right panels
-    - Add mobile-responsive design with stacked panels
-    - Include panel resizing and toggle functionality
-    - _Requirements: 4.1, 4.8, 5.1_
-
-  - [ ] 6.2 Build chat panel components
-    - Create ChatPanel using Aceternity ScrollArea and Card components
-    - Implement MessageList with scrollable conversation history
-    - Build MessageBubble components for user and agent messages
-    - Add TypingIndicator for agent processing states
-    - _Requirements: 4.2, 4.4, 4.6, 7.2_
-
-  - [ ] 6.3 Implement message input system
-    - Create MessageInput using Aceternity Input and Button
-    - Add send functionality with loading states
-    - Include message validation and character limits
-    - _Requirements: 4.2, 4.6_
-
-- [ ] 7. AgentCore API Integration
-  - [ ] 7.1 Create AgentCore client service
+- [x] 6. AgentCore API Integration Setup
+  - [x] 6.1 Create AgentCore client service
     - Implement AgentCoreClient interface for agent invocation
     - Add authentication token handling for API requests
     - Include session ID management for short-term memory
     - Add retry logic with exponential backoff
     - _Requirements: 10.1, 10.2, 10.3, 10.5_
 
-  - [ ] 7.2 Implement message sending and receiving
+- [ ] 7. Chat Interface Foundation
+  - [x] 7.1 Create split-panel layout structure
+    - Implement responsive ChatLayout with left and right panels
+    - Add mobile-responsive design with stacked panels
+    - Include panel resizing and toggle functionality
+    - _Requirements: 4.1, 4.8, 5.1_
+
+  - [x] 7.2 Build chat panel components
+    - Create ChatPanel using Aceternity ScrollArea and Card components
+    - Implement MessageList with scrollable conversation history
+    - Build MessageBubble components for user and agent messages
+    - Add TypingIndicator for agent processing states
+    - _Requirements: 4.2, 4.4, 4.6, 7.2_
+
+  - [x] 7.3 Implement message input system
+    - Create MessageInput using Aceternity Input and Button
+    - Add send functionality with loading states
+    - Include message validation and character limits
+    - _Requirements: 4.2, 4.6_
+
+  - [x] 7.4 Connect chat interface to AgentCore API
     - Connect MessageInput to AgentCore API calls
     - Handle agent responses and update chat state
     - Parse structured data responses for results panel
     - Add error handling for API failures
     - _Requirements: 4.2, 4.3, 10.4, 8.1_
+
+  - [x] 7.5 Create main chat page component
+    - Replace placeholder Chat component in App.tsx with full ChatPage
+    - Integrate authentication checks and redirects
+    - Add proper routing and navigation
+    - _Requirements: 4.1, 6.1_
 
 - [ ] 8. Results Panel Implementation
   - [ ] 8.1 Create dynamic results panel container
@@ -138,18 +144,20 @@
     - Add export and sharing functionality
     - _Requirements: 4.4.1, 4.4.2, 4.4.3, 4.4.5_
 
-- [ ] 9. Session Management and Memory Integration
-  - [ ] 9.1 Implement session lifecycle management
-    - Create session ID generation for new conversations
-    - Handle session expiry and cleanup
-    - Integrate with AgentCore short-term memory
-    - _Requirements: 9.1, 9.2, 9.4_
+- [ ] 9. Additional UI Components and Enhancements
+  - [ ] 9.1 Create missing Aceternity UI components
+    - Implement Tabs component for results panel switching
+    - Create Table component for flight results display
+    - Add Skeleton components for loading states
+    - Build ScrollArea component for chat messages
+    - _Requirements: 4.4, 5.3_
 
-  - [ ] 9.2 Build conversation history management
-    - Implement current session message history display
-    - Add scroll-to-top functionality for message navigation
-    - Clear conversation history on session end
-    - _Requirements: 7.1, 7.2, 7.4, 7.5_
+  - [ ] 9.2 Add authentication state management to chat
+    - Implement authentication checks in chat interface
+    - Add automatic token refresh handling
+    - Include sign-out functionality in chat UI
+    - Handle authentication errors gracefully
+    - _Requirements: 6.1, 6.2, 6.3_
 
 - [ ] 10. Error Handling and User Experience
   - [ ] 10.1 Implement comprehensive error boundaries

@@ -15,10 +15,14 @@ import type {
 } from '../types/chat';
 
 /**
- * Generate a unique session ID
+ * Generate a unique session ID (matches backend format and meets ≥33 char requirement)
  */
 const generateSessionId = (): string => {
-  return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  // Match backend format: travel-session-YYYYMMDDHHMMSS-uuid8chars
+  const now = new Date();
+  const timestamp = now.toISOString().replace(/[-:T.]/g, '').substr(0, 14); // YYYYMMDDHHMMSS
+  const uuidSuffix = crypto.randomUUID().substr(0, 8); // First 8 chars of UUID
+  return `travel-session-${timestamp}-${uuidSuffix}`; // 38 characters total
 };
 
 /**
@@ -43,6 +47,10 @@ export const useChatStore = create<ChatStore>()(
     isLoading: false,
     isSending: false,
     error: null,
+    // Streaming state
+    streamingMessage: null,
+    isStreaming: false,
+    streamingMessageId: null,
 
     // Message actions
     sendMessage: async (content: string) => {
@@ -55,8 +63,14 @@ export const useChatStore = create<ChatStore>()(
         return;
       }
 
-      // Clear any previous errors
-      set({ error: null, isSending: true });
+      // Clear any previous errors and start streaming
+      set({ 
+        error: null, 
+        isSending: true,
+        isStreaming: true,
+        streamingMessage: '',
+        streamingMessageId: generateMessageId()
+      });
 
       // Add user message immediately
       const userMessage: Message = {
@@ -86,12 +100,21 @@ export const useChatStore = create<ChatStore>()(
           },
         };
 
-        // Call AgentCore API
-        const response = await agentCoreClient.invokeAgent(request);
+        // Call AgentCore API with streaming callback
+        const response = await agentCoreClient.invokeAgent(request, (chunk: string, isThinking: boolean) => {
+          // Real-time streaming callback - update UI as chunks arrive
+          if (!isThinking) {
+            const currentState = get();
+            const newStreamingMessage = (currentState.streamingMessage || '') + chunk;
+            set({
+              streamingMessage: newStreamingMessage,
+            });
+          }
+        });
 
-        // Create agent message
+        // Create final agent message when streaming is complete
         const agentMessage: Message = {
-          id: generateMessageId(),
+          id: get().streamingMessageId || generateMessageId(),
           content: response.message,
           sender: 'agent',
           timestamp: new Date(),
@@ -102,13 +125,16 @@ export const useChatStore = create<ChatStore>()(
           },
         };
 
-        // Update state with agent response
+        // Update state with final response and clear streaming
         const currentMessages = get().messages;
         set({
           messages: [...currentMessages, agentMessage],
           currentResults: response.resultData || null,
           resultType: response.resultType || null,
           isSending: false,
+          isStreaming: false,
+          streamingMessage: null,
+          streamingMessageId: null,
           error: null,
         });
 
@@ -132,6 +158,9 @@ export const useChatStore = create<ChatStore>()(
         set({
           messages: [...currentMessages, errorAgentMessage],
           isSending: false,
+          isStreaming: false,
+          streamingMessage: null,
+          streamingMessageId: null,
           error: errorMessage,
         });
       }
@@ -223,13 +252,17 @@ export const useChatStore = create<ChatStore>()(
  * Hook to get chat statistics
  */
 export const useChatStats = () => {
-  return useChatStore((state) => ({
-    messageCount: state.messages.length,
-    userMessageCount: state.messages.filter(m => m.sender === 'user').length,
-    agentMessageCount: state.messages.filter(m => m.sender === 'agent').length,
-    hasResults: !!state.currentResults,
-    isActive: state.isSessionActive,
-  }));
+  const messages = useChatStore((state) => state.messages);
+  const currentResults = useChatStore((state) => state.currentResults);
+  const isSessionActive = useChatStore((state) => state.isSessionActive);
+
+  return {
+    messageCount: messages.length,
+    userMessageCount: messages.filter(m => m.sender === 'user').length,
+    agentMessageCount: messages.filter(m => m.sender === 'agent').length,
+    hasResults: !!currentResults,
+    isActive: isSessionActive,
+  };
 };
 
 /**
@@ -243,8 +276,26 @@ export const useChatMessages = () => {
  * Hook to get only results (for performance)
  */
 export const useChatResults = () => {
-  return useChatStore((state) => ({
-    currentResults: state.currentResults,
-    resultType: state.resultType,
-  }));
+  const currentResults = useChatStore((state) => state.currentResults);
+  const resultType = useChatStore((state) => state.resultType);
+
+  return {
+    currentResults,
+    resultType,
+  };
+};
+
+/**
+ * Hook to get streaming state (for real-time display)
+ */
+export const useChatStreaming = () => {
+  const streamingMessage = useChatStore((state) => state.streamingMessage);
+  const isStreaming = useChatStore((state) => state.isStreaming);
+  const streamingMessageId = useChatStore((state) => state.streamingMessageId);
+
+  return {
+    streamingMessage,
+    isStreaming,
+    streamingMessageId,
+  };
 };

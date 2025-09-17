@@ -177,6 +177,11 @@ export interface ChatState {
   isLoading: boolean;
   isSending: boolean;
   
+  // Streaming states
+  streamingMessage: string | null;
+  isStreaming: boolean;
+  streamingMessageId: string | null;
+  
   // Error handling
   error: string | null;
 }
@@ -224,6 +229,9 @@ export interface AgentCoreResponse {
 
 // AgentCore client interface
 export interface AgentCoreClient {
-  invokeAgent: (request: AgentCoreRequest) => Promise<AgentCoreResponse>;
+  invokeAgent: (
+    request: AgentCoreRequest,
+    onStreamChunk?: (chunk: string, isThinking: boolean) => void
+  ) => Promise<AgentCoreResponse>;
   healthCheck: () => Promise<boolean>;
 }

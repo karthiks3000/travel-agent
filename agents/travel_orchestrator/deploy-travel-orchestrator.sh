@@ -45,6 +45,12 @@ print_error() {
 # Step 1: Prerequisites Check
 echo -e "\n${BLUE}Step 1: Checking Prerequisites${NC}"
 echo "----------------------------------------"
+# Step 1: Prerequisites Check
+echo -e "\n${BLUE}Step 1: Checking Prerequisites${NC}"
+echo "----------------------------------------"
+
+# Determine environment (default to 'dev' if not set to match CDK)
+ENVIRONMENT=${ENVIRONMENT:-dev}
 
 # Check if running from correct directory
 if [[ ! -f "travel_orchestrator.py" ]]; then
@@ -113,6 +119,54 @@ if [[ -z "$NOVA_ACT_API_KEY" ]]; then
     exit 1
 fi
 print_status "Nova Act API key found in environment"
+
+# Step 1.5: Get Cognito Configuration from CDK Stack
+echo -e "\n${BLUE}Step 1.5: Retrieving Cognito Configuration${NC}"
+echo "---------------------------------------------------"
+
+CDK_STACK_NAME="TravelAgentStack-${ENVIRONMENT}"
+
+print_status "Looking for CDK stack: $CDK_STACK_NAME"
+
+# Check if stack exists first
+if ! aws cloudformation describe-stacks --stack-name "$CDK_STACK_NAME" --profile $AWS_PROFILE --region $REGION >/dev/null 2>&1; then
+    print_error "CDK stack '$CDK_STACK_NAME' not found"
+    print_warning "Available stacks:"
+    aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[].StackName" --output table --profile $AWS_PROFILE --region $REGION
+    print_warning "Make sure your CDK stack is deployed with: cd cdk && npm run deploy"
+    exit 1
+fi
+
+print_status "CDK stack found: $CDK_STACK_NAME"
+
+# Get Cognito configuration from CDK outputs
+USER_POOL_ID=$(aws cloudformation describe-stacks \
+    --stack-name "$CDK_STACK_NAME" \
+    --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue" \
+    --output text \
+    --profile $AWS_PROFILE \
+    --region $REGION 2>/dev/null || echo "")
+
+USER_POOL_CLIENT_ID=$(aws cloudformation describe-stacks \
+    --stack-name "$CDK_STACK_NAME" \
+    --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolClientId'].OutputValue" \
+    --output text \
+    --profile $AWS_PROFILE \
+    --region $REGION 2>/dev/null || echo "")
+
+if [[ -z "$USER_POOL_ID" || -z "$USER_POOL_CLIENT_ID" ]]; then
+    print_warning "Could not retrieve Cognito configuration from CDK stack outputs"
+    print_warning "Available outputs from stack $CDK_STACK_NAME:"
+    aws cloudformation describe-stacks --stack-name "$CDK_STACK_NAME" --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" --output table --profile $AWS_PROFILE --region $REGION
+    exit 1
+fi
+
+print_status "Cognito User Pool ID: $USER_POOL_ID"
+print_status "Cognito Client ID: $USER_POOL_CLIENT_ID"
+
+# Construct the discovery URL
+COGNITO_DISCOVERY_URL="https://cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID}/.well-known/openid-configuration"
+print_status "Discovery URL: $COGNITO_DISCOVERY_URL"
 
 # Step 2: Setup Parameter Store
 echo -e "\n${BLUE}Step 2: Setting up AWS Parameter Store${NC}"
@@ -469,14 +523,21 @@ print_status "Multi-agent coordination permissions enabled"
 echo -e "\n${BLUE}Step 4: Configuring AgentCore Agent${NC}"
 echo "--------------------------------------------"
 
-# Configure with CodeBuild (using symbolic link to common directory)
+# Configure with JWT Authentication and CodeBuild
 if agentcore configure \
     --entrypoint travel_orchestrator.py \
     --name $AGENT_NAME \
     --execution-role "$EXECUTION_ROLE_ARN" \
     --requirements-file requirements.txt \
-    --region $REGION; then
-    print_status "AgentCore agent configured for CodeBuild with enhanced IAM role: $AGENT_NAME"
+    --region $REGION \
+    --authorizer-config "{
+        \"customJWTAuthorizer\": {
+            \"discoveryUrl\": \"$COGNITO_DISCOVERY_URL\",
+            \"allowedClients\": [\"$USER_POOL_CLIENT_ID\"]
+        }
+    }"; then
+    print_status "AgentCore agent configured with JWT authentication: $AGENT_NAME"
+    print_status "Authentication: Cognito User Pool JWT Bearer Tokens"
 else
     print_error "AgentCore configuration failed"
     exit 1
@@ -493,11 +554,14 @@ else
     exit 1
 fi
 
-# Step 6: Get deployment details
-echo -e "\n${BLUE}Step 6: Deployment Details${NC}"
-echo "-----------------------------------"
+# Step 6: Get deployment details and HTTP endpoint
+echo -e "\n${BLUE}Step 6: Deployment Details & HTTP Endpoint${NC}"
+echo "----------------------------------------------------"
 
 AGENT_STATUS=$(agentcore status 2>/dev/null || echo "Unknown")
+
+# Get the agent runtime endpoint
+AGENT_ENDPOINT=$(agentcore status --output json 2>/dev/null | jq -r '.endpoint // empty' || echo "")
 
 echo "Agent Name: $AGENT_NAME"
 echo "Enhanced IAM Role: $IAM_ROLE_NAME"
@@ -505,6 +569,16 @@ echo "Status: $AGENT_STATUS"
 echo "Region: $REGION"  
 echo "Parameter Store: $PARAMETER_NAME"
 echo "Multi-Agent Coordination: Enabled"
+echo "Authentication: JWT Bearer Token (Cognito)"
+
+if [[ -n "$AGENT_ENDPOINT" ]]; then
+    print_status "Agent HTTP Endpoint: $AGENT_ENDPOINT"
+    echo ""
+    print_status "Frontend Configuration:"
+    echo "Set this as your VITE_AGENT_CORE_URL: $AGENT_ENDPOINT"
+else
+    print_warning "Could not retrieve agent endpoint. Check with: agentcore status"
+fi
 
 # Step 7: Testing Multi-Agent Orchestration
 echo -e "\n${BLUE}Step 7: Testing Multi-Agent Orchestration${NC}"
@@ -544,22 +618,37 @@ echo "  • cd ../accommodation_agent && ./deploy-accommodation-agent.sh"
 echo "  • cd ../food_agent && ./deploy-food-agent.sh"
 
 # Success summary
-echo -e "\n${GREEN}🎉 Travel Orchestrator Deployment Complete!${NC}"
-echo -e "${GREEN}============================================${NC}"
+echo -e "\n${GREEN}🎉 Travel Orchestrator with JWT Authentication Complete!${NC}"
+echo -e "${GREEN}=========================================================${NC}"
 echo -e "✅ Parameter Store configured with Nova Act API key"
 echo -e "✅ Enhanced IAM role with multi-agent coordination permissions"
 echo -e "✅ Agent built with CodeBuild (cloud-based)"
 echo -e "✅ Travel Orchestrator deployed to AWS AgentCore"
+echo -e "✅ JWT authentication enabled with Cognito User Pool"
+echo -e "✅ HTTP endpoint enabled for frontend access"
 echo -e "✅ Memory management enabled for session handling"
 echo -e "✅ Ready for comprehensive travel planning coordination"
 
+echo -e "\n${BLUE}Frontend Configuration:${NC}"
+echo -e "Create/update ${YELLOW}frontend/.env.local${NC} with:"
+if [[ -n "$AGENT_ENDPOINT" ]]; then
+    echo -e "${YELLOW}VITE_AGENT_CORE_URL=$AGENT_ENDPOINT${NC}"
+else
+    echo -e "${YELLOW}VITE_AGENT_CORE_URL=<AGENT_ENDPOINT_FROM_STATUS>${NC}"
+fi
+echo -e "${YELLOW}VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID${NC}"
+echo -e "${YELLOW}VITE_COGNITO_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID${NC}"
+echo -e "${YELLOW}VITE_ENVIRONMENT=$ENVIRONMENT${NC}"
+
 echo -e "\n${BLUE}Next Steps:${NC}"
-echo -e "1. Ensure specialist agents are deployed: flight_agent, accommodation_agent, food_agent"
-echo -e "2. Test orchestration: ${YELLOW}agentcore invoke '$TEST_PAYLOAD'${NC}"
-echo -e "3. Integrate with frontend for comprehensive travel planning"
-echo -e "4. Use for end-to-end travel booking workflow"
+echo -e "1. Update frontend environment variables (see above)"
+echo -e "2. Ensure specialist agents are deployed: flight_agent, accommodation_agent, food_agent"
+echo -e "3. Test with bearer token: ${YELLOW}agentcore invoke '$TEST_PAYLOAD' --bearer-token <JWT_TOKEN>${NC}"
+echo -e "4. Start frontend and test end-to-end integration"
 
 echo -e "\n${BLUE}Key Features Enabled:${NC}"
+echo -e "• JWT Bearer Token authentication with Cognito"
+echo -e "• Direct HTTP access for frontend integration"
 echo -e "• Multi-agent coordination (flights, hotels, restaurants)"
 echo -e "• Memory-based session management"
 echo -e "• Comprehensive travel plan synthesis"
@@ -568,8 +657,8 @@ echo -e "• Structured JSON responses for frontend integration"
 echo -e "\n${BLUE}Useful Commands:${NC}"
 echo -e "• Check status: ${YELLOW}agentcore status${NC}"
 echo -e "• Update agent: ${YELLOW}agentcore launch${NC}"
+echo -e "• Test with JWT: ${YELLOW}agentcore invoke --bearer-token <TOKEN> '{\"prompt\": \"Plan a trip\"}'${NC}"
 echo -e "• Delete agent: ${YELLOW}agentcore destroy${NC}"
-echo -e "• Test orchestration: ${YELLOW}agentcore invoke '{\"prompt\": \"Plan a trip to Tokyo\"}'${NC}"
 
 echo -e "\n${BLUE}Final Cleanup:${NC}"
 echo -e "✅ Common directory will be automatically cleaned up"

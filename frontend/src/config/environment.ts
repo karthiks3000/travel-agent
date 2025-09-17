@@ -61,13 +61,13 @@ export interface EnvironmentConfig {
 // Development configuration
 const developmentConfig: EnvironmentConfig = {
   environment: 'development',
-  apiUrl: 'http://localhost:3000/api',
-  agentCoreUrl: 'http://localhost:8000',
+  apiUrl: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
+  agentCoreUrl: import.meta.env.VITE_AGENT_CORE_URL || 'http://localhost:8000',
   amplifyConfig: {
     Auth: {
       Cognito: {
-        userPoolId: 'us-east-1_XXXXXXXXX', // Mock value for development
-        userPoolClientId: 'XXXXXXXXXXXXXXXXXXXXXXXXXX', // Mock value for development
+        userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || 'us-east-1_XXXXXXXXX', // Mock value for development
+        userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID || 'XXXXXXXXXXXXXXXXXXXXXXXXXX', // Mock value for development
         loginWith: {
           email: true,
           username: false,
@@ -189,6 +189,9 @@ const getCurrentEnvironment = (): Environment => {
   const env = import.meta.env.VITE_ENVIRONMENT || import.meta.env.MODE || 'development';
   
   switch (env) {
+    case 'dev':
+    case 'development':
+      return 'development';
     case 'staging':
       return 'staging';
     case 'production':

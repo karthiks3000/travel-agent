@@ -10,3 +10,5 @@ export { HeroParallax } from './hero-parallax';
 export { TextGenerateEffect } from './text-generate-effect';
 export { BackgroundGradient } from './background-gradient';
 export { HoverEffect } from './hover-effect';
+export { ScrollArea } from './scroll-area';
+export { Skeleton } from './skeleton';
