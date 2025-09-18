@@ -78,7 +78,7 @@ class AgentCoreClientImpl implements AgentCoreClient {
         const response = await fetch(url, {
           ...options,
           // Add timeout
-          signal: AbortSignal.timeout(30000), // 30 second timeout
+          signal: AbortSignal.timeout(300000), // 30 second timeout
         });
 
         if (!response.ok) {

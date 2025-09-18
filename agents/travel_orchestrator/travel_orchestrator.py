@@ -27,7 +27,8 @@ from tools.memory_hooks import TravelMemoryHook, generate_session_ids
 
 # Import new unified response models from centralized common location
 from common.models.orchestrator_models import (
-    TravelOrchestratorResponse, ResponseType, AgentResponseParser
+    TravelOrchestratorResponse, ResponseType, ResponseStatus, 
+    ToolProgress, AgentResponseParser, create_tool_progress
 )
 
 # Configure logging
@@ -46,33 +47,49 @@ def get_parameter(name):
         return None
 
 
+def extract_user_id_from_context(context) -> str:
+    """
+    Extract user ID from JWT token context using the 'sub' claim
+    
+    Args:
+        context: AgentCore runtime context containing JWT claims
+        
+    Returns:
+        User identifier from JWT 'sub' claim, or 'anonymous' if not available
+    """
+    if not context:
+        logger.warning("No context provided - using anonymous user")
+        return "anonymous"
+    
+    # Extract user ID from JWT 'sub' claim
+    user_id = getattr(context, 'sub', None)
+    if user_id:
+        logger.info(f"✅ Extracted user_id from JWT context: {user_id}")
+        return user_id
+    
+    logger.warning("No user identity found in JWT context - using anonymous")
+    return "anonymous"
+
+
 class TravelOrchestratorAgent(Agent):
-    def __init__(self, memory_id: str = None, actor_id: str = None, session_id: str = None, 
-                 user_id: str = None, region: str = "us-east-1"):
+    def __init__(self, memory_id: str = None, session_id: str = None, 
+                 actor_id: str = None, region: str = "us-east-1"):
         """
         Initialize Travel Orchestrator Agent with memory integration
         
         Args:
             memory_id: AgentCore Memory resource ID (created if not provided)
-            actor_id: Unique actor ID for this agent instance
             session_id: Shared session ID for the conversation
-            user_id: User identifier for personalization
+            actor_id: User identifier for personalization and actor scoping
             region: AWS region for AgentCore services
         """
         # Get current date for system prompt
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
         current_date = datetime.now().strftime("%Y-%m-%d")
         
-        # Generate session and actor IDs if not provided
-        if not session_id or not actor_id:
-            id_config = generate_session_ids(user_id=user_id)
-            session_id = session_id or id_config["session_id"]
-            actor_id = actor_id or id_config["orchestrator"]
-        
         # Store session info for tools
         self.session_id = session_id
         self.actor_id = actor_id
-        self.user_id = user_id
         
         logger.info(f"Initializing Travel Orchestrator - Session: {session_id}, Actor: {actor_id}")
         
@@ -107,7 +124,6 @@ class TravelOrchestratorAgent(Agent):
         agent_state = {
             "actor_id": actor_id,
             "session_id": session_id,
-            "user_id": user_id,
             "agent_type": "travel_orchestrator"
         }
         
@@ -117,8 +133,7 @@ class TravelOrchestratorAgent(Agent):
                 self.validate_travel_information,
                 self.search_flights,
                 self.search_accommodations, 
-                self.search_restaurants,
-                self.plan_comprehensive_trip
+                self.search_restaurants
             ],
             system_prompt=self._build_system_prompt(current_datetime, current_date),
             hooks=[memory_hooks] if memory_hooks else [],
@@ -160,101 +175,129 @@ class TravelOrchestratorAgent(Agent):
         return placeholder_arn
     
     def _build_system_prompt(self, current_datetime: str, current_date: str) -> str:
-        """Build comprehensive system prompt for travel orchestration"""
-        return f"""You are a Travel Orchestrator Agent, the main interface for comprehensive travel planning. Current date and time: {current_datetime}
+        """Build focused system prompt for travel orchestration with JSON response format"""
+        return f"""You are a Travel Orchestrator Agent for travel planning. Current date: {current_datetime}
 
-YOUR ROLE:
-You coordinate multiple specialist agents (flights, accommodations, restaurants) to create personalized travel plans. You are the conversational interface that users interact with directly.
+YOUR ROLE: Coordinate specialist agents (flights, accommodations, restaurants) based on what users specifically request.
 
-CORE WORKFLOW:
+**CRITICAL: YOU MUST ALWAYS RESPOND IN JSON FORMAT USING TravelOrchestratorResponse. NEVER PROVIDE PLAIN TEXT RESPONSES.**
 
-1. INFORMATION GATHERING:
-   - Extract travel details from user requests
-   - Use validate_travel_information tool to check completeness
-   - Ask clarifying questions for missing critical information
-   - Build complete TravelInformation structure progressively
+ALWAYS call validate_travel_information before calling search tools.
 
-2. VALIDATION BEFORE DELEGATION:
-   - ALWAYS call validate_travel_information before calling search tools
-   - Only proceed with searches when validation shows agents are ready
-   - Handle date validation - reject past dates, today is OK
-   - Infer missing information intelligently (passengers = guests, etc.)
+TOOL SELECTION RULES (Listen to what user asks for):
+- "flights" or "flight" → search_flights ONLY
+- "hotels", "accommodations", "places to stay" → search_accommodations ONLY  
+- "restaurants", "food", "dining" → search_restaurants ONLY
+- "trip", "plan", "itinerary", "vacation", "complete travel plan" → CALL MULTIPLE TOOLS (search_flights AND search_accommodations AND search_restaurants) - Strands will execute them concurrently
+- Missing info → Ask for ONLY the missing details (not everything at once)
 
-3. AGENT ORCHESTRATION:
-   - Call specialist agents with natural language requests
-   - Use parallel execution when multiple agents are ready
-   - Handle agent failures gracefully
-   - Combine results from multiple agents
+MULTI-TOOL EXECUTION: When users request comprehensive planning (trip, vacation, complete plan), call all relevant tools:
+- search_flights for flight options
+- search_accommodations for hotel/lodging options  
+- search_restaurants for dining recommendations
+Strands framework will handle concurrent execution automatically.
 
-4. CONVERSATION MANAGEMENT:
-   - Maintain context across multiple turns
-   - Ask specific, targeted questions
-   - Avoid asking for information already provided
-   - Guide users through travel planning process
+REQUIRED INFO BY TOOL:
+- search_flights: origin, destination, departure_date, guests (+ return_date if round-trip)
+- search_accommodations: destination, departure_date, return_date, guests
+- search_restaurants: destination
 
-5. PLAN SYNTHESIS:
-   - Combine results from multiple agents into coherent plans
-   - Provide recommendations based on user preferences
-   - Calculate estimated costs
-   - Present options clearly
+MANDATORY JSON RESPONSE FORMAT - ALL responses must use TravelOrchestratorResponse structure:
 
-CRITICAL RULES:
+When asking for information:
+```json
+{{
+  "response_type": "conversation",
+  "response_status": "requesting_info", 
+  "message": "I need your departure city and travel dates to search for flights.",
+  "overall_progress_message": "Waiting for travel details",
+  "is_final_response": false,
+  "next_expected_input_friendly": "Please provide departure city and travel dates",
+  "tool_progress": [],
+  "success": true
+}}
+```
 
-⚠️  VALIDATION FIRST: Never call search tools without validating requirements first
-⚠️  ONE QUESTION TYPE: Don't ask about flights AND hotels AND dates all at once
-⚠️  CONTEXT AWARENESS: Remember what user has already told you
-⚠️  DATE VALIDATION: Reject requests for past dates (before {current_date})
-⚠️  PROGRESSIVE DISCLOSURE: Gather core info first, preferences later
+When single tool completes successfully:
+```json
+{{
+  "response_type": "flights",
+  "response_status": "complete_success",
+  "message": "Found 12 flight options for your NYC to Paris trip.",
+  "overall_progress_message": "Flight search completed successfully", 
+  "is_final_response": true,
+  "tool_progress": [{{
+    "tool_id": "search_flights",
+    "display_name": "Finding flights",
+    "description": "Searching for flights from NYC to Paris",
+    "status": "completed",
+    "result_preview": "Found 12 flight options starting at $245"
+  }}],
+  "flight_results": {{ ... }},
+  "estimated_costs": {{"flights": 490}},
+  "processing_time_seconds": 15.2,
+  "success": true
+}}
+```
 
-REQUIRED INFORMATION BY AGENT:
+When multiple tools complete (comprehensive planning):
+```json
+{{
+  "response_type": "itinerary",
+  "response_status": "complete_success",
+  "message": "Created your complete travel plan with flights, accommodations, and restaurant recommendations.",
+  "overall_progress_message": "Complete travel plan generated successfully", 
+  "is_final_response": true,
+  "tool_progress": [
+    {{
+      "tool_id": "search_flights",
+      "display_name": "Finding flights",
+      "status": "completed",
+      "result_preview": "Found 8 flight options"
+    }},
+    {{
+      "tool_id": "search_accommodations", 
+      "display_name": "Finding accommodations",
+      "status": "completed",
+      "result_preview": "Found 15 hotel options"
+    }},
+    {{
+      "tool_id": "search_restaurants",
+      "display_name": "Finding restaurants", 
+      "status": "completed",
+      "result_preview": "Found 12 restaurant recommendations"
+    }}
+  ],
+  "flight_results": {{ ... }},
+  "accommodation_results": {{ ... }},
+  "restaurant_results": {{ ... }},
+  "processing_time_seconds": 45.8,
+  "success": true
+}}
+```
 
-FLIGHTS: origin, destination, departure_date, passengers
-- For round-trip: also need return_date
-- Validate all dates are today or future
+When tool fails:
+```json
+{{
+  "response_type": "conversation",
+  "response_status": "tool_error",
+  "message": "I couldn't find flights for those dates. Please try different dates or check the details.",
+  "overall_progress_message": "Flight search failed",
+  "is_final_response": true,
+  "tool_progress": [{{
+    "tool_id": "search_flights", 
+    "display_name": "Finding flights",
+    "status": "failed",
+    "error_message": "No flights available for selected dates"
+  }}],
+  "success": false,
+  "error_message": "Flight search returned no results"
+}}
+```
 
-ACCOMMODATIONS: destination, check_in, check_out, guests  
-- Validate all dates are today or future
-- Can infer from flight dates if missing
-
-RESTAURANTS: destination (minimum)
-- Can search once destination is known
-- Include dietary restrictions if provided
-
-CONVERSATION EXAMPLES:
-
-User: "Plan a trip to Paris"
-You: "I'd love to help plan your Paris trip! To find the best options, I need:
-- What city will you be departing from?
-- What are your travel dates?
-- How many people will be traveling?"
-
-User: "From NYC, June 15-20, 2 people"
-You: [Extract info, validate, then search since we have complete information]
-"Perfect! Let me search for flights from NYC to Paris June 15-20 for 2 people, accommodations, and restaurant recommendations."
-
-TOOL USAGE STRATEGY:
-
-1. validate_travel_information: Check what's missing before any searches
-2. search_flights/accommodations/restaurants: Only after validation confirms readiness
-3. plan_comprehensive_trip: When you have results from multiple agents to synthesize
-
-MEMORY INTEGRATION:
-- User preferences are automatically stored via AgentCore Memory
-- Reference past trips: "Based on your previous Paris trip..."
-- Learn preferences: "I notice you prefer mid-range hotels"
-- Build user profiles over time
-
-RESPONSE STYLE:
-- All tool responses now return structured JSON via TravelOrchestratorResponse
-- When tools return structured data, present the complete JSON response to the user
-- For conversation responses, be conversational and helpful
-- Clear about what information you need
-- Explain what you're searching for
-- Provide specific recommendations with reasoning
-
-IMPORTANT: All search tools (search_flights, search_accommodations, search_restaurants, plan_comprehensive_trip) now return structured TravelOrchestratorResponse objects that contain JSON data perfect for frontend consumption. When these tools complete, you should present their complete response including all structured data.
-
-Remember: You're the intelligent coordinator that makes travel planning effortless by gathering the right information, calling the right agents, and presenting results in a helpful JSON format for easy frontend integration."""
+CONVERSATION CONTEXT: Remember previous messages to avoid asking for information already provided.
+VALIDATION: Reject past dates (before {current_date}). Today is acceptable.
+REMEMBER: Always respond in JSON using TravelOrchestratorResponse format. For comprehensive requests, call multiple tools and let Strands handle concurrent execution."""
 
     @tool
     def validate_travel_information(self, travel_info_dict: dict) -> ValidationResult:
@@ -307,13 +350,20 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
             session_id: Session ID for context (auto-generated if not provided)
         
         Returns:
-            TravelOrchestratorResponse with structured flight results
+            TravelOrchestratorResponse with structured flight results and progress tracking
         """
         if not session_id:
             session_id = self.session_id or str(uuid.uuid4())
         
         start_time = datetime.now()
         print(f"✈️  Searching flights: {travel_request}")
+        
+        # Create progress tracking for this tool
+        flight_progress = create_tool_progress(
+            "search_flights", 
+            {"origin": "departure city", "destination": "destination city"}, 
+            "active"
+        )
         
         try:
             # Use simplified agent invocation (now returns Pydantic models directly - sync call)
@@ -325,9 +375,17 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
                 # Successfully got structured flight data
                 print(f"✅ Flight search complete with structured FlightSearchResults")
                 
+                # Update progress to completed
+                flight_progress.status = "completed"
+                flight_progress.result_preview = f"Found {len(getattr(flight_results, 'all_flights', []))} flight options"
+                
                 return TravelOrchestratorResponse(
                     response_type=ResponseType.FLIGHTS,
+                    response_status=ResponseStatus.COMPLETE_SUCCESS,
                     message=f"Found flight options from your request. {flight_results.recommendation if hasattr(flight_results, 'recommendation') else 'Here are the available flights.'}",
+                    overall_progress_message="Flight search completed successfully",
+                    is_final_response=True,
+                    tool_progress=[flight_progress],
                     flight_results=flight_results,
                     processing_time_seconds=processing_time,
                     session_metadata={
@@ -337,9 +395,16 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
                 )
             else:
                 # Agent failed or returned no structured data
+                flight_progress.status = "failed"
+                flight_progress.error_message = "No flight results found"
+                
                 return TravelOrchestratorResponse(
                     response_type=ResponseType.CONVERSATION,
+                    response_status=ResponseStatus.TOOL_ERROR,
                     message="I searched for flights but couldn't find any results. Please check your travel details and try again.",
+                    overall_progress_message="Flight search completed with no results",
+                    is_final_response=True,
+                    tool_progress=[flight_progress],
                     success=False,
                     processing_time_seconds=processing_time,
                     session_metadata={
@@ -353,9 +418,17 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
             processing_time = (datetime.now() - start_time).total_seconds()
             print(f"❌ Flight search failed: {str(e)}")
             
+            # Update progress to failed
+            flight_progress.status = "failed"
+            flight_progress.error_message = str(e)
+            
             return TravelOrchestratorResponse(
                 response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.TOOL_ERROR,
                 message="I encountered an error while searching for flights. Please try again or provide more specific details.",
+                overall_progress_message="Flight search failed due to an error",
+                is_final_response=True,
+                tool_progress=[flight_progress],
                 success=False,
                 error_message=str(e),
                 processing_time_seconds=processing_time
@@ -371,13 +444,20 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
             session_id: Session ID for context (auto-generated if not provided)
         
         Returns:
-            TravelOrchestratorResponse with structured accommodation results
+            TravelOrchestratorResponse with structured accommodation results and progress tracking
         """
         if not session_id:
             session_id = self.session_id or str(uuid.uuid4())
         
         start_time = datetime.now()
         print(f"🏨 Searching accommodations: {travel_request}")
+        
+        # Create progress tracking for this tool
+        accommodation_progress = create_tool_progress(
+            "search_accommodations", 
+            {"destination": "destination city"}, 
+            "active"
+        )
         
         try:
             # Use simplified agent invocation (now returns Pydantic models directly - sync call)
@@ -389,9 +469,18 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
                 # Successfully got structured accommodation data
                 print(f"✅ Accommodation search complete with structured AccommodationAgentResponse")
                 
+                # Update progress to completed
+                accommodation_progress.status = "completed"
+                accommodation_count = len(getattr(accommodation_results, 'best_accommodations', []))
+                accommodation_progress.result_preview = f"Found {accommodation_count} accommodation options"
+                
                 return TravelOrchestratorResponse(
                     response_type=ResponseType.ACCOMMODATIONS,
+                    response_status=ResponseStatus.COMPLETE_SUCCESS,
                     message=f"Found accommodation options from your request. {accommodation_results.recommendation if hasattr(accommodation_results, 'recommendation') else 'Here are the available accommodations.'}",
+                    overall_progress_message="Accommodation search completed successfully",
+                    is_final_response=True,
+                    tool_progress=[accommodation_progress],
                     accommodation_results=accommodation_results,
                     processing_time_seconds=processing_time,
                     session_metadata={
@@ -401,9 +490,16 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
                 )
             else:
                 # Agent failed or returned no structured data
+                accommodation_progress.status = "failed"
+                accommodation_progress.error_message = "No accommodation results found"
+                
                 return TravelOrchestratorResponse(
                     response_type=ResponseType.CONVERSATION,
+                    response_status=ResponseStatus.TOOL_ERROR,
                     message="I searched for accommodations but couldn't find any results. Please check your travel details and try again.",
+                    overall_progress_message="Accommodation search completed with no results",
+                    is_final_response=True,
+                    tool_progress=[accommodation_progress],
                     success=False,
                     processing_time_seconds=processing_time,
                     session_metadata={
@@ -417,9 +513,17 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
             processing_time = (datetime.now() - start_time).total_seconds()
             print(f"❌ Accommodation search failed: {str(e)}")
             
+            # Update progress to failed
+            accommodation_progress.status = "failed"
+            accommodation_progress.error_message = str(e)
+            
             return TravelOrchestratorResponse(
                 response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.TOOL_ERROR,
                 message="I encountered an error while searching for accommodations. Please try again or provide more specific details.",
+                overall_progress_message="Accommodation search failed due to an error",
+                is_final_response=True,
+                tool_progress=[accommodation_progress],
                 success=False,
                 error_message=str(e),
                 processing_time_seconds=processing_time
@@ -435,13 +539,20 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
             session_id: Session ID for context (auto-generated if not provided)
         
         Returns:
-            TravelOrchestratorResponse with structured restaurant results
+            TravelOrchestratorResponse with structured restaurant results and progress tracking
         """
         if not session_id:
             session_id = self.session_id or str(uuid.uuid4())
         
         start_time = datetime.now()
         print(f"🍽️  Searching restaurants: {travel_request}")
+        
+        # Create progress tracking for this tool
+        restaurant_progress = create_tool_progress(
+            "search_restaurants", 
+            {"destination": "destination city", "dietary_preferences": "dietary preferences"}, 
+            "active"
+        )
         
         try:
             # Use simplified agent invocation (now returns Pydantic models directly - sync call)
@@ -455,9 +566,18 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
                 # Successfully got structured restaurant data
                 print(f"✅ Restaurant search complete with structured RestaurantSearchResults")
                 
+                # Update progress to completed
+                restaurant_progress.status = "completed"
+                restaurant_count = len(getattr(restaurant_results, 'restaurants', []))
+                restaurant_progress.result_preview = f"Found {restaurant_count} restaurant options"
+                
                 return TravelOrchestratorResponse(
                     response_type=ResponseType.RESTAURANTS,
+                    response_status=ResponseStatus.COMPLETE_SUCCESS,
                     message=f"Found restaurant options from your request. {restaurant_results.recommendation if hasattr(restaurant_results, 'recommendation') else 'Here are the available restaurants.'}",
+                    overall_progress_message="Restaurant search completed successfully",
+                    is_final_response=True,
+                    tool_progress=[restaurant_progress],
                     restaurant_results=restaurant_results,
                     processing_time_seconds=processing_time,
                     session_metadata={
@@ -467,9 +587,16 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
                 )
             else:
                 # Agent failed or returned no structured data
+                restaurant_progress.status = "failed"
+                restaurant_progress.error_message = "No restaurant results found"
+                
                 return TravelOrchestratorResponse(
                     response_type=ResponseType.CONVERSATION,
+                    response_status=ResponseStatus.TOOL_ERROR,
                     message="I searched for restaurants but couldn't find any results. Please check your travel details and try again.",
+                    overall_progress_message="Restaurant search completed with no results",
+                    is_final_response=True,
+                    tool_progress=[restaurant_progress],
                     success=False,
                     processing_time_seconds=processing_time,
                     session_metadata={
@@ -483,207 +610,22 @@ Remember: You're the intelligent coordinator that makes travel planning effortle
             processing_time = (datetime.now() - start_time).total_seconds()
             print(f"❌ Restaurant search failed: {str(e)}")
             
+            # Update progress to failed
+            restaurant_progress.status = "failed"
+            restaurant_progress.error_message = str(e)
+            
             return TravelOrchestratorResponse(
                 response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.TOOL_ERROR,
                 message="I encountered an error while searching for restaurants. Please try again or provide more specific details.",
+                overall_progress_message="Restaurant search failed due to an error",
+                is_final_response=True,
+                tool_progress=[restaurant_progress],
                 success=False,
                 error_message=str(e),
                 processing_time_seconds=processing_time
             )
 
-    @tool
-    def plan_comprehensive_trip(self, travel_info_dict: dict, session_id: str = None) -> TravelOrchestratorResponse:
-        """
-        Orchestrate all specialist agents for comprehensive travel planning
-        
-        Args:
-            travel_info_dict: Complete travel information dictionary
-            session_id: Session ID for context (auto-generated if not provided)
-        
-        Returns:
-            TravelOrchestratorResponse with comprehensive itinerary including all specialist results
-        """
-        if not session_id:
-            session_id = self.session_id or str(uuid.uuid4())
-        
-        start_time = datetime.now()
-        print(f"🌍 Planning comprehensive trip: {travel_info_dict}")
-        
-        try:
-            # Parse and validate travel information
-            travel_info = TravelInformation.model_validate(travel_info_dict)
-            
-            # Format natural language request for agents
-            travel_request = format_travel_request(travel_info)
-            print(f"📝 Formatted request: {travel_request}")
-            
-            # Execute parallel agent calls (now returns structured data directly - sync call)
-            print("🔄 Executing parallel agent searches...")
-            structured_results = self.agent_invoker.invoke_parallel_agents(travel_request, session_id)
-            
-            processing_time = (datetime.now() - start_time).total_seconds()
-            
-            # Count successful results
-            successful_results = sum(1 for result in structured_results.values() if result is not None)
-            total_agents = len(structured_results)
-            
-            # Calculate estimated costs from structured results
-            estimated_costs = {}
-            if structured_results.get("flights"):
-                flight_data = structured_results["flights"]
-                if hasattr(flight_data, 'best_outbound_flight') and flight_data.best_outbound_flight:
-                    estimated_costs["flights"] = flight_data.best_outbound_flight.price
-                    if hasattr(flight_data, 'best_return_flight') and flight_data.best_return_flight:
-                        estimated_costs["flights"] += flight_data.best_return_flight.price
-            
-            if structured_results.get("accommodations"):
-                acc_data = structured_results["accommodations"]
-                if hasattr(acc_data, 'best_accommodations') and acc_data.best_accommodations:
-                    # Calculate for trip duration
-                    nights = 1
-                    if travel_info.check_in and travel_info.check_out:
-                        nights = (travel_info.check_out - travel_info.check_in).days
-                    
-                    best_property = acc_data.best_accommodations[0]
-                    if hasattr(best_property, 'price_per_night') and best_property.price_per_night:
-                        estimated_costs["accommodations"] = best_property.price_per_night * nights
-            
-            # Build comprehensive plan for backward compatibility
-            comprehensive_plan = ComprehensiveTravelPlan(
-                destination=travel_info.destination or "Unknown",
-                origin=travel_info.origin or "Unknown", 
-                dates={
-                    "departure": str(travel_info.departure_date) if travel_info.departure_date else "TBD",
-                    "return": str(travel_info.return_date) if travel_info.return_date else "TBD"
-                },
-                travelers=travel_info.passengers or travel_info.guests or 1,
-                flight_results=None,  # Will use structured results instead
-                accommodation_results=None,  # Will use structured results instead
-                restaurant_results=None,  # Will use structured results instead
-                agents_used=list(structured_results.keys()),
-                generation_time_seconds=processing_time,
-                completeness_score=successful_results / total_agents if total_agents > 0 else 0,
-                confidence_score=min(successful_results / total_agents, 0.9) if total_agents > 0 else 0,
-                estimated_costs=estimated_costs,
-                total_estimated_cost=sum(estimated_costs.values()) if estimated_costs else 0
-            )
-            
-            # Create success message
-            if successful_results == total_agents:
-                message = f"Successfully created a comprehensive travel plan for your trip to {travel_info.destination}! I found flights, accommodations, and restaurant recommendations."
-            elif successful_results > 0:
-                found_items = [key for key, value in structured_results.items() if value is not None]
-                message = f"I was able to find {', '.join(found_items)} for your trip to {travel_info.destination}. Some searches may have encountered issues, but here's what I found."
-            else:
-                message = "I encountered issues with all specialist agents, but I'll provide what information I can."
-            
-            print(f"✅ Comprehensive plan generated: {successful_results}/{total_agents} agents successful")
-            
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.ITINERARY,
-                message=message,
-                flight_results=structured_results.get("flights"),
-                accommodation_results=structured_results.get("accommodations"),
-                restaurant_results=structured_results.get("restaurants"),
-                comprehensive_plan=comprehensive_plan,
-                processing_time_seconds=processing_time,
-                estimated_costs=estimated_costs,
-                session_metadata={
-                    "session_id": session_id,
-                    "agents_used": list(structured_results.keys()),
-                    "successful_agents": successful_results,
-                    "total_agents": total_agents
-                }
-            )
-            
-        except Exception as e:
-            processing_time = (datetime.now() - start_time).total_seconds()
-            print(f"❌ Comprehensive planning failed: {str(e)}")
-            
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.CONVERSATION,
-                message="I encountered an error while creating your comprehensive travel plan. Please try again or break down your request into individual searches for flights, accommodations, and restaurants.",
-                success=False,
-                error_message=str(e),
-                processing_time_seconds=processing_time,
-                session_metadata={
-                    "session_id": session_id,
-                    "error_type": "comprehensive_planning_failure"
-                }
-            )
-
-    def _calculate_estimated_costs(self, results: Dict[str, AgentSearchResult], 
-                                 travel_info: TravelInformation) -> Dict[str, float]:
-        """Calculate estimated costs from agent results"""
-        costs = {}
-        
-        # Flight costs
-        if results.get("flights") and results["flights"].success:
-            flight_data = results["flights"].results
-            if isinstance(flight_data, dict) and "flights" in flight_data:
-                flights = flight_data["flights"]
-                if flights and len(flights) > 0:
-                    # Use average of first few flights
-                    prices = [f.get("price", 0) for f in flights[:3] if isinstance(f, dict)]
-                    if prices:
-                        costs["flights"] = sum(prices) / len(prices)
-        
-        # Accommodation costs  
-        if results.get("accommodations") and results["accommodations"].success:
-            acc_data = results["accommodations"].results
-            if isinstance(acc_data, dict):
-                properties = acc_data.get("combined_results", []) or acc_data.get("airbnb_properties", [])
-                if properties and len(properties) > 0:
-                    # Calculate for trip duration
-                    nights = 1
-                    if travel_info.check_in and travel_info.check_out:
-                        nights = (travel_info.check_out - travel_info.check_in).days
-                    
-                    # Use average of first few properties
-                    nightly_prices = [p.get("price_per_night", 0) for p in properties[:3] if isinstance(p, dict)]
-                    if nightly_prices:
-                        avg_nightly = sum(nightly_prices) / len(nightly_prices)
-                        costs["accommodations"] = avg_nightly * nights
-        
-        return costs
-
-    def _generate_recommendations(self, results: Dict[str, AgentSearchResult], 
-                                travel_info: TravelInformation) -> Dict[str, Any]:
-        """Generate recommendations based on search results"""
-        recommendations = {}
-        
-        # Flight recommendations
-        if results.get("flights") and results["flights"].success:
-            flight_data = results["flights"].results
-            if isinstance(flight_data, dict) and "flights" in flight_data:
-                flights = flight_data["flights"]
-                if flights:
-                    # Find cheapest and fastest options
-                    cheapest = min(flights, key=lambda f: f.get("price", float('inf')))
-                    recommendations["cheapest_flight"] = {
-                        "airline": cheapest.get("airline"),
-                        "price": cheapest.get("price"),
-                        "reason": "Most affordable option"
-                    }
-        
-        # Accommodation recommendations
-        if results.get("accommodations") and results["accommodations"].success:
-            acc_data = results["accommodations"].results
-            if isinstance(acc_data, dict):
-                properties = acc_data.get("combined_results", [])
-                if properties:
-                    # Find highest rated option
-                    rated_properties = [p for p in properties if p.get("rating")]
-                    if rated_properties:
-                        best_rated = max(rated_properties, key=lambda p: p.get("rating", 0))
-                        recommendations["best_accommodation"] = {
-                            "title": best_rated.get("title"),
-                            "rating": best_rated.get("rating"),
-                            "price": best_rated.get("price_per_night"),
-                            "reason": "Highest rated option"
-                        }
-        
-        return recommendations
 
 
 # Bedrock AgentCore integration
@@ -694,7 +636,7 @@ MEMORY_ID = None
 MEMORY_CLIENT = None
 
 def initialize_memory(region: str = "us-east-1") -> str:
-    """Initialize shared memory resource for travel planning"""
+    """Initialize shared short-term memory resource for travel planning"""
     global MEMORY_ID, MEMORY_CLIENT
     
     if MEMORY_ID:
@@ -702,68 +644,91 @@ def initialize_memory(region: str = "us-east-1") -> str:
     
     try:
         MEMORY_CLIENT = MemoryClient(region_name=region)
-        memory_name = f"TravelOrchestrator_STM_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        # Try to get existing memory from environment
-        existing_memory_id = os.getenv('TRAVEL_ORCHESTRATOR_MEMORY_ID')
-        if existing_memory_id:
-            MEMORY_ID = existing_memory_id
-            logger.info(f"Using existing memory ID from environment: {MEMORY_ID}")
-            return MEMORY_ID
+        # Check if memory_id exists in global variable or from SSM
+        memory_id_from_ssm = get_parameter('/travel-agent/memory-resource-id')
+        if memory_id_from_ssm:
+            try:
+                # Verify the memory resource still exists
+                MEMORY_CLIENT.get_memory(memoryId=memory_id_from_ssm)
+                MEMORY_ID = memory_id_from_ssm
+                logger.info(f"✅ Using existing memory from SSM: {MEMORY_ID}")
+                return MEMORY_ID
+            except Exception as e:
+                logger.warning(f"⚠️  Memory ID from SSM is invalid: {e}")
         
-        # Create new memory resource
-        logger.info("Creating new memory resource...")
+        # Create new memory for short-term conversation context only
+        logger.info("Creating new short-term memory resource...")
         memory = MEMORY_CLIENT.create_memory_and_wait(
-            name=memory_name,
-            description="Travel Orchestrator Short-term Memory",
-            strategies=[],
-            event_expiry_days=7,
+            name="TravelOrchestratorMemory",
+            description="Travel Orchestrator short-term memory for conversation context",
+            strategies=[],  # Required parameter - empty list for basic short-term memory
+            event_expiry_days=30,
             max_wait=300,
             poll_interval=10
         )
         
         MEMORY_ID = memory['id']
-        logger.info(f"✅ Created memory with ID: {MEMORY_ID}")
+        logger.info(f"✅ Created new short-term memory: {MEMORY_ID}")
+        
+        # Store in SSM for future use
+        try:
+            ssm = boto3.client('ssm')
+            ssm.put_parameter(
+                Name='/travel-agent/memory-resource-id',
+                Value=MEMORY_ID,
+                Type='String',
+                Description='Travel orchestrator short-term memory resource ID',
+                Overwrite=True
+            )
+            logger.info(f"✅ Stored memory ID in SSM parameter store")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not store memory ID in SSM: {e}")
+        
         return MEMORY_ID
         
     except Exception as e:
         logger.error(f"Failed to initialize memory: {e}")
-        # Continue without memory - agent will work without memory features
         return None
 
 @app.entrypoint
-async def travel_orchestrator_invocation(payload):
+async def travel_orchestrator_invocation(payload, context=None):
     """Travel orchestrator entry point for AgentCore Runtime"""
     if "prompt" not in payload:
         yield {"error": "Missing 'prompt' in payload"}
         return
     
     try:
-        # Extract user context
-        user_id = payload.get("user_id", "anonymous")
-        session_id = payload.get("session_id")
         region = payload.get("region", "us-east-1")
         
-        # Generate session IDs if not provided
-        if not session_id:
-            id_config = generate_session_ids(user_id=user_id)
-            session_id = id_config["session_id"]
-            actor_id = id_config["orchestrator"]
-        else:
-            # Use provided session_id and generate actor_id
-            actor_id = f"travel-orchestrator-{session_id}"
+        # Extract session ID from AgentCore context (from HTTP header)
+        session_id = None
+        if context and hasattr(context, 'session_id'):
+            session_id = context.session_id
+            logger.info(f"✅ Extracted session ID from AgentCore context: {session_id}")
+        elif context and hasattr(context, 'runtime_session_id'):
+            session_id = context.runtime_session_id  
+            logger.info(f"✅ Extracted runtime session ID from AgentCore context: {session_id}")
         
-        logger.info(f'🚀 Starting travel orchestration - User: {user_id}, Session: {session_id}, Actor: {actor_id}')
+        # Generate session IDs if still not provided
+        if not session_id:
+            session_id = generate_session_ids()
+            logger.info(f"🆔 Generated new session ID: {session_id}")
+        else:
+            logger.info(f"🔄 Continuing existing session: {session_id}")
+
+        actor_id = "travel-orchestrator"
+        
+        logger.info(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
         
         # Initialize memory (optional - agent works without it)
-        memory_id = initialize_memory(region)
+        memory_id = initialize_memory(region=region)
         
         # Create agent instance with session-specific configuration
         agent = TravelOrchestratorAgent(
             memory_id=memory_id,
-            actor_id=actor_id,
             session_id=session_id,
-            user_id=user_id,
+            actor_id=actor_id,
             region=region
         )
         

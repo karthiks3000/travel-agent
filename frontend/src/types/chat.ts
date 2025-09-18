@@ -14,7 +14,36 @@ export interface Message {
     resultData?: ResultData;
     sessionId?: string;
     error?: boolean;
+    responseStatus?: ResponseStatus;
+    toolProgress?: ToolProgress[];
+    overallProgressMessage?: string;
+    isFinalResponse?: boolean;
   };
+}
+
+// Response status indicators
+export type ResponseStatus = 
+  | 'requesting_info'           // Agent needs more details
+  | 'validating'                // Checking provided info
+  | 'thinking'                  // Agent is analyzing
+  | 'calling_tools'             // Executing specialist agents
+  | 'tool_in_progress'          // Individual tool running
+  | 'processing_results'        // Combining results
+  | 'partial_results'           // Some tools succeeded
+  | 'complete_success'          // All requested data found
+  | 'complete_with_recommendations' // Results + suggestions
+  | 'tool_error'                // Specialist agent failed
+  | 'validation_error'          // Invalid input provided
+  | 'system_error';             // General system failure
+
+// Tool progress tracking
+export interface ToolProgress {
+  tool_id: string;              // Internal tool identifier
+  display_name: string;         // User-friendly tool name
+  description: string;          // Detailed description of what the tool is doing
+  status: 'pending' | 'active' | 'completed' | 'failed';
+  result_preview?: string;      // Brief preview of results if completed
+  error_message?: string;       // Error details if status is failed
 }
 
 // Result types that can be returned by the agent
@@ -24,7 +53,7 @@ export type ResultType = 'flights' | 'accommodations' | 'restaurants' | 'itinera
 export interface BaseResultData {
   type: ResultType;
   timestamp: Date;
-  searchMetadata?: Record<string, any>;
+  searchMetadata?: Record<string, unknown>;
   recommendation?: string;
 }
 
@@ -112,8 +141,8 @@ export interface RestaurantSearchResults extends BaseResultData {
   next_page_token?: string;
   search_params?: {
     text_query: string;
-    location_bias?: Record<string, any>;
-    location_restriction?: Record<string, any>;
+    location_bias?: Record<string, unknown>;
+    location_restriction?: Record<string, unknown>;
     price_levels?: string[];
     min_rating?: number;
     open_now?: boolean;
@@ -132,7 +161,7 @@ export interface ItineraryItem {
   title: string;
   description: string;
   location?: string;
-  details: FlightResult | PropertyResult | RestaurantResult | Record<string, any>;
+  details: FlightResult | PropertyResult | RestaurantResult | Record<string, unknown>;
 }
 
 export interface ItineraryData extends BaseResultData {
@@ -215,7 +244,7 @@ export interface AgentCoreRequest {
   sessionId: string;
   message: string;
   authToken: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AgentCoreResponse {
@@ -223,7 +252,7 @@ export interface AgentCoreResponse {
   sessionId: string;
   resultType?: ResultType;
   resultData?: ResultData;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   error?: string;
 }
 

@@ -8,6 +8,7 @@ import {
   signIn,
   signOut,
   getCurrentUser,
+  fetchUserAttributes,
   confirmSignUp,
   resendSignUpCode,
   resetPassword,
@@ -111,6 +112,9 @@ class CognitoServiceImpl implements CognitoService {
         return null;
       }
 
+      // Fetch user attributes separately to get complete user data
+      const userAttributes = await fetchUserAttributes();
+
       return {
         userId: user.userId,
         username: user.username,
@@ -119,10 +123,10 @@ class CognitoServiceImpl implements CognitoService {
           authFlowType: user.signInDetails.authFlowType || '',
         } : undefined,
         attributes: {
-          email: (user as any).attributes?.email || '',
-          email_verified: (user as any).attributes?.email_verified,
-          name: (user as any).attributes?.name,
-          ...(user as any).attributes,
+          email: userAttributes.email || '',
+          email_verified: userAttributes.email_verified,
+          name: userAttributes.given_name || userAttributes.name || '',
+          ...userAttributes,
         },
       };
     } catch (error) {

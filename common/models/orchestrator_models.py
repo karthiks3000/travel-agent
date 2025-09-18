@@ -2,7 +2,7 @@
 Unified response models for Travel Orchestrator Agent
 """
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 from enum import Enum
 from datetime import datetime
 
@@ -22,6 +22,39 @@ class ResponseType(str, Enum):
     ITINERARY = "itinerary"          # Complete travel plan with multiple components
 
 
+class ResponseStatus(str, Enum):
+    """Status indicators for the orchestrator agent's current state"""
+    # Information gathering
+    REQUESTING_INFO = "requesting_info"           # Agent needs more details
+    VALIDATING = "validating"                     # Checking provided info
+    
+    # Processing states  
+    THINKING = "thinking"                         # Agent is analyzing
+    CALLING_TOOLS = "calling_tools"               # Executing specialist agents
+    TOOL_IN_PROGRESS = "tool_in_progress"         # Individual tool running
+    PROCESSING_RESULTS = "processing_results"     # Combining results
+    
+    # Completion states
+    PARTIAL_RESULTS = "partial_results"           # Some tools succeeded
+    COMPLETE_SUCCESS = "complete_success"         # All requested data found
+    COMPLETE_WITH_RECOMMENDATIONS = "complete_with_recommendations" # Results + suggestions
+    
+    # Error states
+    TOOL_ERROR = "tool_error"                     # Specialist agent failed
+    VALIDATION_ERROR = "validation_error"         # Invalid input provided
+    SYSTEM_ERROR = "system_error"                 # General system failure
+
+
+class ToolProgress(BaseModel):
+    """Progress tracking for individual tools"""
+    tool_id: str = Field(..., description="Internal tool identifier")
+    display_name: str = Field(..., description="User-friendly tool name")
+    description: str = Field(..., description="Detailed description of what the tool is doing")
+    status: Literal["pending", "active", "completed", "failed"] = Field(..., description="Current tool status")
+    result_preview: Optional[str] = Field(None, description="Brief preview of results if completed")
+    error_message: Optional[str] = Field(None, description="Error details if status is failed")
+
+
 class TravelOrchestratorResponse(BaseModel):
     """
     Unified response model for Travel Orchestrator Agent
@@ -36,6 +69,30 @@ class TravelOrchestratorResponse(BaseModel):
     message: str = Field(..., description="Human-readable message explaining the response")
     success: bool = Field(default=True, description="Whether the operation was successful")
     error_message: Optional[str] = Field(None, description="Error details if success=False")
+    
+    # NEW STATUS FIELDS
+    response_status: ResponseStatus = Field(
+        ResponseStatus.COMPLETE_SUCCESS, 
+        description="Current agent status for frontend handling"
+    )
+    is_final_response: bool = Field(
+        default=False, 
+        description="Whether this completes the user's request"
+    )
+    next_expected_input_friendly: Optional[str] = Field(
+        None, 
+        description="User-friendly description of what agent needs from user next"
+    )
+    overall_progress_message: str = Field(
+        ..., 
+        description="Overall status message for user display"
+    )
+    
+    # PROGRESS TRACKING
+    tool_progress: List[ToolProgress] = Field(
+        default_factory=list,
+        description="Progress tracking for all tools being executed"
+    )
     
     # Structured data from specialist agents
     flight_results: Optional[FlightSearchResults] = Field(
@@ -95,7 +152,7 @@ class TravelOrchestratorResponse(BaseModel):
             components.append("comprehensive plan")
         
         component_str = ", ".join(components) if components else "conversation only"
-        return f"{self.response_type.value} response with {component_str}"
+        return f"{self.response_type.value} response with {component_str} (status: {self.response_status.value})"
     
     def get_total_estimated_cost(self) -> Optional[float]:
         """Calculate total estimated cost across all components"""
@@ -112,6 +169,43 @@ class TravelOrchestratorResponse(BaseModel):
             self.restaurant_results is not None,
             self.comprehensive_plan is not None
         ])
+    
+    def get_completed_tools_count(self) -> int:
+        """Get count of completed tools"""
+        return len([tool for tool in self.tool_progress if tool.status == "completed"])
+    
+    def get_failed_tools_count(self) -> int:
+        """Get count of failed tools"""
+        return len([tool for tool in self.tool_progress if tool.status == "failed"])
+    
+    def has_active_tools(self) -> bool:
+        """Check if any tools are currently active"""
+        return any(tool.status == "active" for tool in self.tool_progress)
+
+
+# Tool display mapping for user-friendly progress
+TOOL_DISPLAY_MAPPING = {
+    "validate_travel_information": {
+        "display_name": "Validating details",
+        "description_template": "Checking your travel information"
+    },
+    "search_flights": {
+        "display_name": "Finding flights", 
+        "description_template": "Searching for flights from {origin} to {destination}"
+    },
+    "search_accommodations": {
+        "display_name": "Finding accommodations",
+        "description_template": "Looking for places to stay in {destination}"
+    },
+    "search_restaurants": {
+        "display_name": "Finding restaurants",
+        "description_template": "Searching for {dietary_preferences} restaurants in {destination}"
+    },
+    "plan_comprehensive_trip": {
+        "display_name": "Creating itinerary",
+        "description_template": "Combining all results into your travel plan"
+    }
+}
 
 
 class AgentResponseParser:
@@ -175,3 +269,32 @@ class AgentResponseParser:
         except Exception as e:
             print(f"⚠️  Failed to parse restaurant response: {e}")
             return None
+
+
+def create_tool_progress(tool_id: str, travel_info: dict = None, status: str = "pending") -> ToolProgress:
+    """Helper function to create user-friendly tool progress objects"""
+    if tool_id not in TOOL_DISPLAY_MAPPING:
+        return ToolProgress(
+            tool_id=tool_id,
+            display_name=tool_id.replace("_", " ").title(),
+            description=f"Executing {tool_id}",
+            status=status
+        )
+    
+    mapping = TOOL_DISPLAY_MAPPING[tool_id]
+    
+    # Format description with travel info if available
+    description = mapping["description_template"]
+    if travel_info:
+        try:
+            description = description.format(**travel_info)
+        except (KeyError, ValueError):
+            # Fallback if template formatting fails
+            pass
+    
+    return ToolProgress(
+        tool_id=tool_id,
+        display_name=mapping["display_name"],
+        description=description,
+        status=status
+    )

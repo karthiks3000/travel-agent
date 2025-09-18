@@ -9,3 +9,4 @@ export { MessageBubble } from './MessageBubble';
 export { MessageInput } from './MessageInput';
 export { TypingIndicator } from './TypingIndicator';
 export { ResultsPanel } from './ResultsPanel';
+export { ProgressPanel } from './ProgressPanel';

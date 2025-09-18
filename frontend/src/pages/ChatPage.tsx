@@ -61,10 +61,10 @@ export const ChatPage: React.FC = () => {
     <div className="bg-white border-b border-gray-200 px-4 py-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <h1 className="text-xl font-semibold text-gray-900">Travel Assistant</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Travel Agent</h1>
           {user && (
             <span className="text-sm text-gray-500">
-              Welcome, {user.attributes.name}
+              Welcome {user.attributes.name}
             </span>
           )}
         </div>

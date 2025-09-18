@@ -317,41 +317,22 @@ def create_shared_memory(region: str = "us-east-1", memory_name: str = None) -> 
         raise e
 
 
-def generate_session_ids(user_id: str = None, conversation_start: datetime = None) -> Dict[str, str]:
+def generate_session_ids() -> Dict[str, str]:
     """
     Generate consistent session and actor IDs for the travel planning system
-    
-    Args:
-        user_id: User identifier (if available)
-        conversation_start: When conversation started (defaults to now)
         
     Returns:
-        Dictionary with session_id and actor_ids for all agents
+        session_id
     """
-    if not conversation_start:
-        conversation_start = datetime.now()
+    conversation_start = datetime.now()
     
     # Create session ID with UUID suffix to meet AWS 33-character minimum requirement
     timestamp_suffix = conversation_start.strftime('%Y%m%d%H%M%S')
     uuid_suffix = str(uuid.uuid4())[:8]  # First 8 characters of UUID
     
-    if user_id:
-        session_id = f"travel-{user_id}-{timestamp_suffix}-{uuid_suffix}"
-    else:
-        session_id = f"travel-session-{timestamp_suffix}-{uuid_suffix}"
+    session_id = f"travel-session-{timestamp_suffix}-{uuid_suffix}"
     
-    # Create actor IDs for each agent in the system
-    actor_ids = {
-        "orchestrator": f"travel-orchestrator-{session_id}",
-        "flight_agent": f"flight-specialist-{session_id}",
-        "accommodation_agent": f"accommodation-specialist-{session_id}",
-        "food_agent": f"food-specialist-{session_id}"
-    }
-    
-    return {
-        "session_id": session_id,
-        **actor_ids
-    }
+    return session_id
 
 
 def format_conversation_history(turns: List[List[Dict[str, Any]]]) -> str:

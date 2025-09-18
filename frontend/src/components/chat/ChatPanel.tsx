@@ -12,7 +12,7 @@ import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
-import { MessageSquare, User } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 
 interface ChatPanelProps {
   className?: string;
@@ -32,19 +32,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ className }) => {
               <MessageSquare className="w-5 h-5 text-blue-600" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold text-gray-900">Travel Assistant</h2>
               <p className="text-sm text-gray-500">
-                {user?.attributes.name ? `Welcome back, ${user.attributes.name}` : 'How can I help you plan your trip?'}
+                How can I help you plan your trip?
               </p>
             </div>
-            {user && (
-              <div className="flex items-center space-x-2">
-                <div className="flex items-center justify-center w-8 h-8 bg-gray-100 rounded-full">
-                  <User className="w-4 h-4 text-gray-600" />
-                </div>
-                <span className="text-sm text-gray-600">{user.attributes.name}</span>
-              </div>
-            )}
           </div>
         </CardHeader>
       </Card>

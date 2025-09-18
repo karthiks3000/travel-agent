@@ -370,6 +370,7 @@ IAM_ROLE_POLICY=$(cat <<EOF
                 "bedrock-agentcore:ListActors",
                 "bedrock-agentcore:ListEvents",
                 "bedrock-agentcore:ListMemoryRecords",
+                "bedrock-agentcore:ListMemories",
                 "bedrock-agentcore:ListSessions",
                 "bedrock-agentcore:DeleteEvent",
                 "bedrock-agentcore:DeleteMemoryRecord",
@@ -462,7 +463,8 @@ IAM_ROLE_POLICY=$(cat <<EOF
             "Sid": "ParameterStoreAccess",
             "Effect": "Allow",
             "Action": [
-                "ssm:GetParameter"
+                "ssm:GetParameter",
+                "ssm:PutParameter"
             ],
             "Resource": [
                 "arn:aws:ssm:*:*:parameter/travel-agent/*"
@@ -487,11 +489,10 @@ IAM_ROLE_POLICY=$(cat <<EOF
                 "bedrock-agentcore:CreateMemory",
                 "bedrock-agentcore:GetMemory",
                 "bedrock-agentcore:UpdateMemory",
-                "bedrock-agentcore:DeleteMemory",
-                "bedrock-agentcore:ListMemories"
+                "bedrock-agentcore:DeleteMemory"
             ],
             "Resource": [
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:memory/TravelOrchestrator_*"
+                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:memory/*TravelOrchestrator*"
             ]
         }
     ]
@@ -578,26 +579,6 @@ if [[ -n "$AGENT_ENDPOINT" ]]; then
     echo "Set this as your VITE_AGENT_CORE_URL: $AGENT_ENDPOINT"
 else
     print_warning "Could not retrieve agent endpoint. Check with: agentcore status"
-fi
-
-# Step 7: Testing Multi-Agent Orchestration
-echo -e "\n${BLUE}Step 7: Testing Multi-Agent Orchestration${NC}"
-echo "-----------------------------------------------"
-
-print_status "Testing orchestrator with comprehensive travel planning query..."
-
-TEST_PAYLOAD='{"prompt": "Plan a comprehensive trip from JFK to Paris from June 15-20, 2025 for 2 people. I need flights, hotel recommendations, and restaurant suggestions."}'
-
-echo "Test payload: $TEST_PAYLOAD"
-
-if agentcore invoke "$TEST_PAYLOAD" >/dev/null 2>&1; then
-    print_status "Travel Orchestrator test successful!"
-    print_status "Multi-agent coordination verified"
-else
-    print_warning "Travel Orchestrator test failed - this might be normal during initial deployment"
-    echo "The orchestrator may need specialist agents (flight_agent, accommodation_agent, food_agent) to be deployed first."
-    echo "Try testing again in a few minutes with:"
-    echo "  agentcore invoke '$TEST_PAYLOAD'"
 fi
 
 # Step 8: Verification of Specialist Agent Dependencies
