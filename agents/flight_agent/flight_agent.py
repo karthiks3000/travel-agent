@@ -152,7 +152,23 @@ For OUTBOUND flight (the one that was clicked and selected):
 {"For RETURN flight (if round-trip and return flight was selected):" if return_date else ""}
 {"- Same format as outbound but for the return direction" if return_date else ""}
 
-Return the selected flight details in the proper schema format."""
+For SEARCH_METADATA (required dictionary with search parameters and context):
+- origin: "{origin}"
+- destination: "{destination}"
+- departure_date: "{departure_date}"
+- return_date: "{return_date if return_date else 'null'}"
+- passenger_count: {passengers}
+- trip_type: "{'round_trip' if return_date else 'one_way'}"
+- search_performed_at: Current date and time when search was performed (e.g., "2024-12-22T10:30:00")
+- total_results_found: Number of flight options that were displayed (e.g., 15)
+- price_range: Object with "min" and "max" prices seen on page (e.g., {{"min": 200, "max": 800}})
+- airlines_available: Array of airline names found on the search results page
+- search_duration_seconds: Approximate time it took to complete the search (estimate 3-5 seconds)
+
+For RECOMMENDATION (required string):
+Provide personalized advice about the selected flight(s) based on price competitiveness, convenience factors (direct vs stops), timing, and overall value. Include booking recommendations.
+
+Return the complete flight search results in the proper schema format with all required fields populated."""
         
         # Use module-level browser wrapper
         result = browser_wrapper.execute_instructions(

@@ -17,6 +17,17 @@ interface ResultsPanelProps {
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
   const { currentResults, resultType } = useChatResults();
 
+  // Debug logging
+  React.useEffect(() => {
+    console.log('🎯 ResultsPanel received:', {
+      currentResults,
+      resultType,
+      hasResults: !!currentResults,
+      resultsType: typeof currentResults,
+      resultsKeys: currentResults ? Object.keys(currentResults) : null
+    });
+  }, [currentResults, resultType]);
+
   const getResultIcon = (type: string) => {
     switch (type) {
       case 'flights':

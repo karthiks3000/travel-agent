@@ -138,8 +138,17 @@ export const getAmplifyConfig = (): AmplifyConfig => {
  * Get AgentCore API URL from configuration
  */
 export const getAgentCoreUrl = (): string => {
-  if (isDevelopment() && amplifyOutputs?.custom?.agentCoreUrl) {
-    return amplifyOutputs.custom.agentCoreUrl;
+  if (isDevelopment()) {
+    // In development, use proxy path to avoid CORS issues
+    if (amplifyOutputs?.custom?.agentCoreUrl) {
+      return amplifyOutputs.custom.agentCoreUrl;
+    }
+    // Convert localhost URLs to use proxy
+    const configUrl = config.agentCoreUrl;
+    if (configUrl.startsWith('http://localhost:8080')) {
+      return configUrl.replace('http://localhost:8080', '/api');
+    }
+    return configUrl;
   }
   return config.agentCoreUrl;
 };

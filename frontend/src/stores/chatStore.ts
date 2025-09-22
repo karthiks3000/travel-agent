@@ -11,6 +11,7 @@ import type {
   ChatStore, 
   Message, 
   ResultData,
+  ResultType,
   AgentCoreRequest 
 } from '../types/chat';
 
@@ -100,37 +101,90 @@ export const useChatStore = create<ChatStore>()(
           },
         };
 
-        // Call AgentCore API with streaming callback
-        const response = await agentCoreClient.invokeAgent(request, (chunk: string, isThinking: boolean) => {
-          // Real-time streaming callback - update UI as chunks arrive
-          if (!isThinking) {
-            const currentState = get();
-            const newStreamingMessage = (currentState.streamingMessage || '') + chunk;
-            set({
-              streamingMessage: newStreamingMessage,
-            });
+        // Call AgentCore API with JSON response (non-streaming)
+        const response = await agentCoreClient.invokeAgent(request);
+
+        // Process response based on new backend format
+        let resultType: ResultType | null = null;
+        let resultData: ResultData | null = null;
+        const displayMessage = response.message || "No response";
+
+        // Handle complete_success responses with results
+        if (response.response_status === "complete_success" && response.response_type) {
+          // Map response_type to resultType and extract appropriate data
+          switch (response.response_type) {
+            case "flights":
+              resultType = "flights";
+              if (response.flight_results) {
+                resultData = {
+                  ...response.flight_results,
+                  type: "flights" as const,
+                  timestamp: new Date()
+                };
+              }
+              break;
+            case "accommodations":
+              resultType = "accommodations";
+              if (response.accommodation_results) {
+                resultData = {
+                  ...response.accommodation_results,
+                  type: "accommodations" as const,
+                  timestamp: new Date()
+                };
+              }
+              break;
+            case "restaurants":
+              resultType = "restaurants";
+              if (response.restaurant_results) {
+                resultData = {
+                  ...response.restaurant_results,
+                  type: "restaurants" as const,
+                  timestamp: new Date()
+                };
+              }
+              break;
+            case "itinerary":
+              resultType = "itinerary";
+              if (response.comprehensive_plan) {
+                resultData = response.comprehensive_plan;
+              }
+              break;
+            default:
+              // conversation or other types - no structured results
+              break;
           }
-        });
+        }
 
         // Create final agent message when streaming is complete
         const agentMessage: Message = {
           id: get().streamingMessageId || generateMessageId(),
-          content: response.message,
+          content: displayMessage,
           sender: 'agent',
           timestamp: new Date(),
           metadata: {
-            sessionId: response.sessionId,
-            resultType: response.resultType,
-            resultData: response.resultData,
+            sessionId: response.sessionId || sessionId,
+            resultType: resultType || undefined,
+            resultData: resultData || undefined,
+            responseStatus: response.response_status,
+            responseType: response.response_type,
           },
         };
 
         // Update state with final response and clear streaming
         const currentMessages = get().messages;
+        
+        // Debug logging
+        console.log('🔍 Setting results in store:', {
+          resultType,
+          resultData,
+          responseType: response.response_type,
+          responseStatus: response.response_status
+        });
+        
         set({
           messages: [...currentMessages, agentMessage],
-          currentResults: response.resultData || null,
-          resultType: response.resultType || null,
+          currentResults: resultData,
+          resultType: resultType,
           isSending: false,
           isStreaming: false,
           streamingMessage: null,

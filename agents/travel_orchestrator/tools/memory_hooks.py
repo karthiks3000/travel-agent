@@ -47,38 +47,51 @@ class TravelMemoryHook(HookProvider):
             
             logger.info(f"Loading conversation history for actor_id: {actor_id}, session_id: {session_id}")
             
-            # Get last 5 conversation turns for context
+            # Get fewer turns to reduce context contamination
             recent_turns = self.memory_client.get_last_k_turns(
                 memory_id=self.memory_id,
                 actor_id=actor_id,
                 session_id=session_id,
-                k=5,  # Load last 5 conversation turns
+                k=6,  # Reduced from 10 to 6 turns (3 conversations max)
                 branch_name="main"
             )
             
             if recent_turns:
-                # Format conversation history for context
+                # Format conversation history for context, filtering successful interactions only
                 context_messages = []
                 for turn in recent_turns:
                     for message in turn:
                         role = message['role'].lower()
                         content = message['content']['text']
-                        context_messages.append(f"{role.title()}: {content}")
+                        
+                        # Filter out failed searches and error messages
+                        if not any(keyword in content.lower() for keyword in [
+                            'validation error', 'tool error', 'missing required',
+                            'need more information', 'i need', 'failed', 'error occurred',
+                            'please provide', 'system error'
+                        ]):
+                            context_messages.append(f"{role.title()}: {content}")
                 
-                # Create formatted context
-                context = "\n".join(context_messages)
-                logger.info(f"Context from memory: {context[:200]}...")  # Log first 200 chars
+                # Only keep last 6 clean messages to avoid overwhelming context
+                filtered_messages = context_messages[-6:]
                 
-                # Add context to agent's system prompt
-                conversation_context = f"""
+                if filtered_messages:
+                    # Create formatted context
+                    context = "\n".join(filtered_messages)
+                    logger.info(f"Context from memory (filtered): {context[:200]}...")  # Log first 200 chars
+                    
+                    # Add context to agent's system prompt
+                    conversation_context = f"""
 
-PREVIOUS CONVERSATION CONTEXT:
+PREVIOUS CONVERSATION CONTEXT (successful interactions only):
 {context}
 
 Continue the conversation naturally based on this context. Reference previous discussions when relevant."""
-                
-                event.agent.system_prompt += conversation_context
-                logger.info(f"✅ Loaded {len(recent_turns)} recent conversation turns")
+                    
+                    event.agent.system_prompt += conversation_context
+                    logger.info(f"✅ Loaded {len(filtered_messages)} clean conversation messages")
+                else:
+                    logger.info("✨ No clean conversation context found - starting fresh")
             else:
                 logger.info("No previous conversation history found - this is a new conversation")
                 
@@ -159,6 +172,16 @@ Continue the conversation naturally based on this context. Reference previous di
             # For assistant messages, check if it's a final response vs tool result
             if role == "assistant":
                 content = message.get("content", "")
+                content_str = str(content).lower()
+                
+                # Skip validation errors and tool failures that contaminate context
+                if any(error_keyword in content_str for error_keyword in [
+                    'validation_error', 'missing required', 'need more information',
+                    'system_error', 'tool_error', 'failed to', 'error occurred',
+                    'i need more information', 'please provide'
+                ]):
+                    logger.info("🔇 Skipping error/validation message")
+                    return False
                 
                 # Skip tool results (they contain toolResult, toolUseId, etc.)
                 if isinstance(content, dict) and any(key in str(content).lower() for key in 
@@ -206,7 +229,8 @@ Continue the conversation naturally based on this context. Reference previous di
             
             # Handle string content directly
             if isinstance(content, str):
-                return content.strip()
+                clean_content = self._clean_content_for_storage(content)
+                return clean_content
             
             # Handle list content - extract text fields
             if isinstance(content, list):
@@ -222,21 +246,57 @@ Continue the conversation naturally based on this context. Reference previous di
                             # Include other text content
                             text_parts.append(str(item))
                 
-                return "\n".join(text_parts).strip()
+                combined_content = "\n".join(text_parts).strip()
+                return self._clean_content_for_storage(combined_content)
             
             # Handle dict content
             if isinstance(content, dict):
                 if "text" in content:
-                    return content["text"].strip()
+                    clean_content = self._clean_content_for_storage(content["text"].strip())
+                    return clean_content
                 elif not any(key in str(content).lower() for key in 
                     ["toolresult", "tooluseid", "tooluse", "tool_use_id"]):
-                    return str(content).strip()
+                    clean_content = self._clean_content_for_storage(str(content).strip())
+                    return clean_content
             
             return ""
             
         except Exception as e:
             logger.error(f"Error extracting conversational content: {e}")
             return ""
+    
+    def _clean_content_for_storage(self, content: str) -> str:
+        """
+        Clean content for memory storage by removing thinking blocks, JSON responses, etc.
+        
+        Args:
+            content: Raw content string
+            
+        Returns:
+            Clean conversational content suitable for memory storage
+        """
+        import re
+        import json
+        
+        # Remove thinking blocks completely
+        cleaned = re.sub(r'<thinking>.*?</thinking>', '', content, flags=re.DOTALL).strip()
+        
+        # If it's a JSON response, try to extract just the message field
+        if cleaned.startswith('{') and cleaned.endswith('}'):
+            try:
+                json_data = json.loads(cleaned)
+                if 'message' in json_data:
+                    # Use the message field instead of the full JSON
+                    cleaned = json_data['message']
+                    logger.info("📝 Extracted message field from JSON response for storage")
+            except json.JSONDecodeError:
+                # If JSON parsing fails, keep the original cleaned content
+                pass
+        
+        # Remove extra whitespace and normalize
+        cleaned = re.sub(r'\n\s*\n', '\n', cleaned).strip()
+        
+        return cleaned
     
     def _truncate_message(self, content: str, max_length: int = 8000) -> str:
         """

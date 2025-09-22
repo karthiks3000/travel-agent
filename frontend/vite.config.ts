@@ -10,4 +10,23 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    proxy: {
+      // Proxy API requests to AgentCore backend during development
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        // Add some debugging
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.log('Proxy error:', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log('Proxying request:', req.method, req.url, '→', proxyReq.getHeader('host') + proxyReq.path);
+          });
+        },
+      }
+    }
+  }
 });

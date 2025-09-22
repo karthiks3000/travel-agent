@@ -15,6 +15,7 @@ export interface Message {
     sessionId?: string;
     error?: boolean;
     responseStatus?: ResponseStatus;
+    responseType?: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'itinerary';
     toolProgress?: ToolProgress[];
     overallProgressMessage?: string;
     isFinalResponse?: boolean;
@@ -248,12 +249,38 @@ export interface AgentCoreRequest {
 }
 
 export interface AgentCoreResponse {
+  // Core response fields
   message: string;
-  sessionId: string;
+  sessionId?: string;
+  success: boolean;
+  error?: string;
+  
+  // New orchestrator response fields
+  response_type: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'itinerary';
+  response_status: ResponseStatus;
+  overall_progress_message: string;
+  is_final_response: boolean;
+  next_expected_input_friendly?: string;
+  
+  // Tool progress tracking
+  tool_progress: ToolProgress[];
+  
+  // Structured results from specialist agents
+  flight_results?: FlightSearchResults;
+  accommodation_results?: AccommodationSearchResults;
+  restaurant_results?: RestaurantSearchResults;
+  comprehensive_plan?: ItineraryData;
+  
+  // Additional metadata
+  processing_time_seconds?: number;
+  estimated_costs?: Record<string, number>;
+  recommendations?: Record<string, unknown>;
+  session_metadata?: Record<string, string>;
+  
+  // Legacy fields for backward compatibility
   resultType?: ResultType;
   resultData?: ResultData;
   metadata?: Record<string, unknown>;
-  error?: string;
 }
 
 // AgentCore client interface

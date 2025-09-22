@@ -11,7 +11,6 @@ import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
 import { useChatStore } from '@/stores/chatStore';
-import { useAuthStore } from '@/stores/authStore';
 import { MessageSquare } from 'lucide-react';
 
 interface ChatPanelProps {
@@ -20,7 +19,7 @@ interface ChatPanelProps {
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({ className }) => {
   const { messages, isSending, error } = useChatStore();
-  const { user } = useAuthStore();
+  // const { user } = useAuthStore(); // Removed unused variable
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
