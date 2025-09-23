@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { useChatResults } from '@/stores/chatStore';
 import { BarChart3, Plane, Building, UtensilsCrossed, MapPin, AlertCircle } from 'lucide-react';
 import type { ResultData } from '@/types/chat';
@@ -63,22 +63,22 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
     return (
       <div className={cn("flex flex-col h-full", className)}>
         {/* Header */}
-        <Card className="rounded-none border-0 border-b">
-          <CardHeader className="pb-3">
+        <div className="border-b border-gray-200 bg-white flex-shrink-0">
+          <div className="px-4 py-4">
             <div className="flex items-center space-x-3">
               <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-full">
                 <BarChart3 className="w-5 h-5 text-gray-600" />
               </div>
-              <div>
-                <CardTitle className="text-lg">Results</CardTitle>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900">Results</h3>
                 <p className="text-sm text-gray-500">Search results will appear here</p>
               </div>
             </div>
-          </CardHeader>
-        </Card>
+          </div>
+        </div>
 
         {/* Empty state */}
-        <div className="flex-1 flex items-center justify-center p-8">
+        <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
           <div className="text-center max-w-md">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <BarChart3 className="w-8 h-8 text-gray-400" />
@@ -119,24 +119,24 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
-      <Card className="rounded-none border-0 border-b">
-        <CardHeader className="pb-3">
+      <div className="border-b border-gray-200 bg-white flex-shrink-0">
+        <div className="px-4 py-4">
           <div className="flex items-center space-x-3">
             <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-full">
               {getResultIcon(resultType)}
             </div>
             <div className="flex-1">
-              <CardTitle className="text-lg">{getResultTitle(resultType)}</CardTitle>
+              <h3 className="text-lg font-semibold text-gray-900">{getResultTitle(resultType)}</h3>
               <p className="text-sm text-gray-500">
                 Updated {new Date(currentResults.timestamp).toLocaleTimeString()}
               </p>
             </div>
           </div>
-        </CardHeader>
-      </Card>
+        </div>
+      </div>
 
       {/* Results Content */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 min-h-0 overflow-auto p-4">
         <ResultsContent results={currentResults} />
       </div>
     </div>

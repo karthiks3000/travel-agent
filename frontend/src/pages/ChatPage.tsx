@@ -58,49 +58,52 @@ export const ChatPage: React.FC = () => {
 
   // Chat header component
   const ChatHeader = () => (
-    <div className="bg-white border-b border-gray-200 px-4 py-3">
+    <div className="bg-white border-b border-gray-200 px-4 py-3 flex-shrink-0">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <h1 className="text-xl font-semibold text-gray-900">Travel Agent</h1>
+        </div>
+        
+        <div className="flex items-center space-x-4">
           {user && (
             <span className="text-sm text-gray-500">
               Welcome {user.attributes.name}
             </span>
           )}
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleNewSession}
-            className="flex items-center space-x-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>New Session</span>
-          </Button>
           
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSignOut}
-            className="flex items-center space-x-2"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNewSession}
+              className="flex items-center space-x-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>New Session</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSignOut}
+              className="flex items-center space-x-2"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Sign Out</span>
+            </Button>
+          </div>
         </div>
       </div>
     </div>
   );
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       {/* Header */}
       <ChatHeader />
       
       {/* Chat Interface */}
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         <ChatLayout
           leftPanel={<ChatPanel />}
           rightPanel={<ResultsPanel />}

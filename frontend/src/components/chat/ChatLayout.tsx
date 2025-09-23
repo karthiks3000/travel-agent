@@ -107,14 +107,14 @@ export const ChatLayout: React.FC<ChatLayoutProps> = ({
   return (
     <div 
       id="chat-container"
-      className={cn("flex h-screen bg-gray-50", className)}
+      className={cn("flex h-full bg-gray-50", className)}
     >
       {/* Left Panel - Chat */}
       <div 
-        className="flex flex-col bg-white border-r border-gray-200 transition-all duration-200"
+        className="flex flex-col bg-white border-r border-gray-200 transition-all duration-200 h-full"
         style={{ width: `${leftPanelWidth}%` }}
       >
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {leftPanel}
         </div>
       </div>
@@ -122,7 +122,7 @@ export const ChatLayout: React.FC<ChatLayoutProps> = ({
       {/* Resizer */}
       <div
         className={cn(
-          "w-1 bg-gray-200 hover:bg-gray-300 cursor-col-resize transition-colors duration-200 relative group",
+          "w-1 bg-gray-200 hover:bg-gray-300 cursor-col-resize transition-colors duration-200 relative group flex-shrink-0",
           isResizing && "bg-blue-400"
         )}
         onMouseDown={handleMouseDown}
@@ -138,10 +138,10 @@ export const ChatLayout: React.FC<ChatLayoutProps> = ({
 
       {/* Right Panel - Results */}
       <div 
-        className="flex flex-col bg-white transition-all duration-200"
+        className="flex flex-col bg-white transition-all duration-200 h-full"
         style={{ width: `${100 - leftPanelWidth}%` }}
       >
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {rightPanel}
         </div>
       </div>
