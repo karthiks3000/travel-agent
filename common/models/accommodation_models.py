@@ -24,30 +24,6 @@ class PropertyResult(BaseModel):
     bedrooms: Optional[int] = Field(None, description="Number of bedrooms")
     bathrooms: Optional[int] = Field(None, description="Number of bathrooms")
     
-class AccommodationSearchParams(BaseModel):
-    """Parameters for accommodation search"""
-    location: str = Field(..., description="Destination city or location")
-    check_in: str = Field(..., description="Check-in date in YYYY-MM-DD format")
-    check_out: str = Field(..., description="Check-out date in YYYY-MM-DD format")
-    guests: int = Field(default=1, ge=1, le=16, description="Number of guests")
-    rooms: int = Field(default=1, ge=1, le=8, description="Number of rooms (for hotels)")
-    min_price: Optional[float] = Field(None, description="Minimum price per night")
-    max_price: Optional[float] = Field(None, description="Maximum price per night")
-    property_types: List[str] = Field(default_factory=list, description="Preferred property types")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "location": "Paris, France",
-                "check_in": "2024-06-15",
-                "check_out": "2024-06-18",
-                "guests": 2,
-                "rooms": 1,
-                "max_price": 200.0,
-                "property_types": ["entire_place", "private_room"]
-            }
-        }
-
 class PlatformSearchResults(BaseModel):
     """Results from a single platform search"""
     platform: str = Field(..., description="Platform name")

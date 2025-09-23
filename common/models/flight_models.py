@@ -26,24 +26,3 @@ class FlightSearchResults(BaseModel):
     search_metadata: dict = Field(default_factory=dict, description="Additional search metadata")
     recommendation: str = Field(..., description="Agent's personalized flight recommendations and booking advice")
     validation_error: Optional[ValidationError] = Field(None, description="Validation error details if applicable")
-
-class FlightSearchParams(BaseModel):
-    """Parameters for flight search"""
-    origin: str = Field(..., description="Origin airport code or city")
-    destination: str = Field(..., description="Destination airport code or city") 
-    departure_date: str = Field(..., description="Departure date in YYYY-MM-DD format")
-    return_date: Optional[str] = Field(None, description="Return date in YYYY-MM-DD format for round-trip")
-    passengers: int = Field(default=1, ge=1, le=9, description="Number of passengers")
-    cabin_class: str = Field(default="Economy", description="Cabin class preference")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "origin": "JFK",
-                "destination": "CDG", 
-                "departure_date": "2024-06-15",
-                "return_date": "2024-06-22",
-                "passengers": 2,
-                "cabin_class": "Economy"
-            }
-        }
