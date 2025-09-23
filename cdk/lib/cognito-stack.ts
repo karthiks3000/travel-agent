@@ -134,6 +134,9 @@ export class CognitoStack extends Construct {
       ],
     });
 
+    // Note: Cognito domain for OAuth endpoints will be created programmatically 
+    // by gateway_utils.py following AWS Labs pattern (not via CDK)
+
     // Add custom attributes for travel preferences (optional)
     this.userPool.addClient('TravelAgentMobileClient', {
       userPoolClientName: `travel-agent-mobile-client-${props.environment}`,

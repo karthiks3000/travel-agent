@@ -186,6 +186,98 @@ else
     exit 1
 fi
 
+# Step 2.5: Setup Google Maps API Key
+echo -e "\n${BLUE}Step 2.5: Setting up Google Maps API Key${NC}"
+echo "-------------------------------------------------------"
+
+if [[ -z "$GOOGLE_PLACES_API_KEY" ]]; then
+    print_error "GOOGLE_PLACES_API_KEY environment variable not set"
+    echo "Get your API key from: https://console.cloud.google.com/apis/credentials"
+    echo "Enable these APIs: Places API, Maps JavaScript API, Geocoding API"
+    echo "Set it with: export GOOGLE_PLACES_API_KEY='your_api_key_here'"
+    exit 1
+fi
+
+print_status "Google Maps API key found in environment"
+
+# Step 2.6: Get Gateway S3 Bucket from CDK Stack
+echo -e "\n${BLUE}Step 2.6: Retrieving Gateway S3 Bucket${NC}"
+echo "----------------------------------------------------"
+
+GATEWAY_BUCKET_NAME=$(aws cloudformation describe-stacks \
+    --stack-name "$CDK_STACK_NAME" \
+    --query "Stacks[0].Outputs[?OutputKey=='GatewayBucketName'].OutputValue" \
+    --output text \
+    --profile $AWS_PROFILE \
+    --region $REGION 2>/dev/null || echo "")
+
+if [[ -z "$GATEWAY_BUCKET_NAME" ]]; then
+    print_error "Could not retrieve Gateway S3 bucket from CDK stack"
+    print_warning "Make sure CDK stack includes GatewayBucketName output"
+    print_warning "Run: cd ../../cdk && npm run deploy"
+    exit 1
+fi
+
+print_status "Gateway S3 Bucket: $GATEWAY_BUCKET_NAME"
+print_status "Cognito domain will be created programmatically (AWS Labs pattern)"
+
+# Step 2.7: Setup AgentCore Gateway Infrastructure
+echo -e "\n${BLUE}Step 2.7: Setting up AgentCore Gateway${NC}"
+echo "----------------------------------------------------"
+
+print_status "Installing Gateway setup dependencies..."
+pip install requests boto3 >/dev/null 2>&1
+
+print_status "Setting up complete Gateway infrastructure..."
+
+# Run Gateway setup using Python utilities
+python3 -c "
+import sys
+sys.path.append('.')
+from gateway_utils import setup_gateway_infrastructure, store_gateway_config_in_parameters
+
+try:
+    # Setup Gateway with Google Maps integration (domain will be created automatically)
+    config = setup_gateway_infrastructure(
+        user_pool_id='$USER_POOL_ID',
+        openapi_spec_path='../../docs/google-maps-travel-agent-openapi.json',
+        google_places_api_key='$GOOGLE_PLACES_API_KEY',
+        region='$REGION',
+        bucket_name='$GATEWAY_BUCKET_NAME'
+    )
+    
+    # Store config in Parameter Store (including user pool ID for agent access)
+    store_gateway_config_in_parameters(config, '$REGION')
+    
+    # Store user pool ID separately for agent access
+    import boto3
+    ssm = boto3.client('ssm', region_name='$REGION')
+    ssm.put_parameter(
+        Name='/travel-agent/gateway-user-pool-id',
+        Value='$USER_POOL_ID',
+        Type='String',
+        Overwrite=True,
+        Description='User Pool ID for Gateway authentication'
+    )
+    
+    print('✅ Gateway setup completed successfully')
+    print(f'Gateway URL: {config[\"gateway_url\"]}')
+    
+except Exception as e:
+    print(f'❌ Gateway setup failed: {e}')
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+"
+
+if [[ $? -eq 0 ]]; then
+    print_status "AgentCore Gateway with Google Maps API configured successfully"
+    print_status "Google Maps tools now available via MCP protocol"
+else
+    print_error "Gateway setup failed"
+    exit 1
+fi
+
 # Verify parameter was created
 if aws ssm get-parameter \
     --name "$PARAMETER_NAME" \
@@ -599,16 +691,18 @@ echo "  • cd ../accommodation_agent && ./deploy-accommodation-agent.sh"
 echo "  • cd ../food_agent && ./deploy-food-agent.sh"
 
 # Success summary
-echo -e "\n${GREEN}🎉 Travel Orchestrator with JWT Authentication Complete!${NC}"
-echo -e "${GREEN}=========================================================${NC}"
+echo -e "\n${GREEN}🎉 Travel Orchestrator with Google Maps Integration Complete!${NC}"
+echo -e "${GREEN}============================================================${NC}"
 echo -e "✅ Parameter Store configured with Nova Act API key"
+echo -e "✅ Google Maps API integrated via AgentCore Gateway"
 echo -e "✅ Enhanced IAM role with multi-agent coordination permissions"
 echo -e "✅ Agent built with CodeBuild (cloud-based)"
 echo -e "✅ Travel Orchestrator deployed to AWS AgentCore"
 echo -e "✅ JWT authentication enabled with Cognito User Pool"
 echo -e "✅ HTTP endpoint enabled for frontend access"
 echo -e "✅ Memory management enabled for session handling"
-echo -e "✅ Ready for comprehensive travel planning coordination"
+echo -e "✅ MCP tool discovery enabled for automatic Google Maps tool access"
+echo -e "✅ Ready for comprehensive travel planning with location intelligence"
 
 echo -e "\n${BLUE}Frontend Configuration:${NC}"
 echo -e "Create/update ${YELLOW}frontend/.env.local${NC} with:"

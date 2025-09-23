@@ -1,0 +1,606 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Google Maps Platform for Travel Agent",
+    "description": "Curated Google Maps APIs optimized for travel planning and restaurant discovery",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://maps.googleapis.com"
+    }
+  ],
+  "paths": {
+    "/maps/api/place/textsearch/json": {
+      "get": {
+        "operationId": "searchPlacesByText",
+        "summary": "Search places by text query",
+        "description": "Find restaurants, hotels, attractions, and other places based on text search queries like 'restaurants in Paris' or 'hotels near Eiffel Tower'",
+        "tags": ["Places Search"],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "description": "Search query like 'restaurants in Paris', 'hotels near Times Square', or 'attractions in Rome'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "restaurants in Paris"
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "description": "Bias results around latitude,longitude coordinates",
+            "schema": {
+              "type": "string"
+            },
+            "example": "48.8566,2.3522"
+          },
+          {
+            "name": "radius",
+            "in": "query",
+            "description": "Search radius in meters (max 50,000)",
+            "schema": {
+              "type": "number"
+            },
+            "example": 10000
+          },
+          {
+            "name": "type",
+            "in": "query", 
+            "description": "Restrict to specific place type (restaurant, lodging, tourist_attraction, etc.)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "restaurant"
+          },
+          {
+            "name": "minprice",
+            "in": "query",
+            "description": "Minimum price level (0-4: 0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          {
+            "name": "maxprice",
+            "in": "query",
+            "description": "Maximum price level (0-4: 0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          {
+            "name": "opennow",
+            "in": "query",
+            "description": "Only return places that are currently open",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful place search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Place"
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "next_page_token": {
+                      "type": "string"
+                    },
+                    "html_attributions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/maps/api/place/nearbysearch/json": {
+      "get": {
+        "operationId": "searchNearbyPlaces",
+        "summary": "Search places near a location",
+        "description": "Find places within a specified area around a location. Perfect for finding restaurants, attractions, or services near hotels or landmarks.",
+        "tags": ["Places Search"],
+        "parameters": [
+          {
+            "name": "location",
+            "in": "query",
+            "description": "Center point as latitude,longitude",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "48.8566,2.3522"
+          },
+          {
+            "name": "radius",
+            "in": "query",
+            "description": "Search radius in meters (required, max 50,000)",
+            "required": true,
+            "schema": {
+              "type": "number"
+            },
+            "example": 5000
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Place type to search for (restaurant, lodging, tourist_attraction, etc.)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "restaurant"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "Search keyword (e.g., 'italian food', 'luxury hotel', 'museum')",
+            "schema": {
+              "type": "string"
+            },
+            "example": "italian food"
+          },
+          {
+            "name": "minprice",
+            "in": "query",
+            "description": "Minimum price level (0-4)",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          {
+            "name": "maxprice",
+            "in": "query", 
+            "description": "Maximum price level (0-4)",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          {
+            "name": "opennow",
+            "in": "query",
+            "description": "Only return places that are currently open",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful nearby search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Place"
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "next_page_token": {
+                      "type": "string"
+                    },
+                    "html_attributions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/maps/api/place/details/json": {
+      "get": {
+        "operationId": "getPlaceDetails",
+        "summary": "Get detailed place information",
+        "description": "Get comprehensive details about a specific place including contact info, hours, reviews, and photos",
+        "tags": ["Place Details"],
+        "parameters": [
+          {
+            "name": "place_id",
+            "in": "query",
+            "description": "Unique place identifier from search results",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "ChIJN1t_tDeuEmsRUsoyG83frY4"
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated list of fields to return (name,formatted_address,geometry,rating,opening_hours,price_level,photos,reviews,website,formatted_phone_number)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "name,formatted_address,geometry,rating,opening_hours,price_level,website,formatted_phone_number"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detailed place information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "$ref": "#/components/schemas/Place"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "html_attributions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/maps/api/place/findplacefromtext/json": {
+      "get": {
+        "operationId": "findPlaceFromText",
+        "summary": "Find specific place by name or address",
+        "description": "Find a specific place by name, address, or phone number. Returns place_id for getting detailed information.",
+        "tags": ["Place Discovery"],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "description": "Place name, address, or phone number to search for",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "Eiffel Tower"
+          },
+          {
+            "name": "inputtype",
+            "in": "query",
+            "description": "Type of input (textquery or phonenumber)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["textquery", "phonenumber"]
+            },
+            "example": "textquery"
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated list of fields to return",
+            "schema": {
+              "type": "string"
+            },
+            "example": "place_id,name,formatted_address,geometry,rating"
+          },
+          {
+            "name": "locationbias",
+            "in": "query",
+            "description": "Prefer results in specified area (circle:radius@lat,lng or rectangle:sw_lat,sw_lng|ne_lat,ne_lng)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "circle:10000@48.8566,2.3522"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Place candidates matching the search",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Place"
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/maps/api/place/autocomplete/json": {
+      "get": {
+        "operationId": "autocompletePlace",
+        "summary": "Get place autocomplete predictions",
+        "description": "Get place name suggestions as user types. Useful for implementing place search autocomplete functionality.",
+        "tags": ["Autocomplete"],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "description": "Partial place name or address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "Eiffel"
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "description": "Bias predictions around latitude,longitude",
+            "schema": {
+              "type": "string"
+            },
+            "example": "48.8566,2.3522"
+          },
+          {
+            "name": "radius",
+            "in": "query",
+            "description": "Bias radius in meters",
+            "schema": {
+              "type": "number"
+            },
+            "example": 50000
+          },
+          {
+            "name": "types",
+            "in": "query",
+            "description": "Restrict to place types (establishment, geocode, etc.)",
+            "schema": {
+              "type": "string"
+            },
+            "example": "establishment"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Autocomplete predictions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "predictions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PlaceAutocompletePrediction"
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Place": {
+        "type": "object",
+        "description": "A place with location and business information",
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Unique identifier for the place"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the place"
+          },
+          "formatted_address": {
+            "type": "string",
+            "description": "Full formatted address"
+          },
+          "geometry": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "object",
+                "properties": {
+                  "lat": {
+                    "type": "number"
+                  },
+                  "lng": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "rating": {
+            "type": "number",
+            "description": "Average rating from 1.0 to 5.0"
+          },
+          "price_level": {
+            "type": "integer",
+            "description": "Price level from 0-4 (0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories this place belongs to (restaurant, lodging, tourist_attraction, etc.)"
+          },
+          "business_status": {
+            "type": "string",
+            "enum": ["OPERATIONAL", "CLOSED_TEMPORARILY", "CLOSED_PERMANENTLY"],
+            "description": "Current operational status"
+          },
+          "opening_hours": {
+            "type": "object",
+            "properties": {
+              "open_now": {
+                "type": "boolean"
+              },
+              "weekday_text": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "photo_reference": {
+                  "type": "string"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "width": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "user_ratings_total": {
+            "type": "number",
+            "description": "Total number of reviews"
+          },
+          "website": {
+            "type": "string",
+            "description": "Official website URL"
+          },
+          "formatted_phone_number": {
+            "type": "string",
+            "description": "Phone number in local format"
+          },
+          "international_phone_number": {
+            "type": "string",
+            "description": "Phone number in international format"
+          },
+          "vicinity": {
+            "type": "string",
+            "description": "Simplified address"
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "author_name": {
+                  "type": "string"
+                },
+                "rating": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "time": {
+                  "type": "number"
+                },
+                "relative_time_description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PlaceAutocompletePrediction": {
+        "type": "object",
+        "description": "Autocomplete prediction for a place",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Full description of the predicted place"
+          },
+          "place_id": {
+            "type": "string", 
+            "description": "Place ID for getting detailed information"
+          },
+          "structured_formatting": {
+            "type": "object",
+            "properties": {
+              "main_text": {
+                "type": "string",
+                "description": "Main text (usually place name)"
+              },
+              "secondary_text": {
+                "type": "string",
+                "description": "Secondary text (usually address/location)"
+              }
+            }
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories for this place"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "key",
+        "description": "Google Maps API key"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
+}

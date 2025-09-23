@@ -3,4 +3,6 @@ strands-agents
 boto3
 requests
 pydantic
+mcp
 aws-opentelemetry-distro>=0.10.0
+nova-act

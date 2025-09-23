@@ -3,33 +3,24 @@ Travel Orchestrator Agent - Main conversational interface for travel planning
 """
 import os
 import json
-import asyncio
-import uuid
-from datetime import datetime, date
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import List, Optional
 
 import boto3
 import logging
 from strands import Agent, tool
 from strands.hooks import HookRegistry
+from strands.tools.mcp.mcp_client import MCPClient
+from mcp.client.streamable_http import streamablehttp_client
 from bedrock_agentcore import BedrockAgentCoreApp
 from bedrock_agentcore.memory import MemoryClient
-from common.models.travel_models import (
-    TravelInformation, ValidationResult, AgentSearchResult, 
-    ComprehensiveTravelPlan, ConversationContext
-)
-from common.models.base_models import TripType, BudgetCategory
-from tools.validation_tools import (
-    validate_travel_requirements, validate_dates, infer_missing_dates
-)
 from tools.flight_search_tool import search_flights_direct
 from tools.accommodation_search_tool import search_accommodations_direct
 from tools.memory_hooks import TravelMemoryHook, generate_session_ids
 
 # Import new unified response models from centralized common location
 from common.models.orchestrator_models import (
-    TravelOrchestratorResponse, ResponseType, ResponseStatus, 
-    ToolProgress, AgentResponseParser, create_tool_progress
+    TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
 )
 
 # Configure logging
@@ -76,7 +67,7 @@ class TravelOrchestratorAgent(Agent):
     def __init__(self, memory_id: str = None, session_id: str = None, 
                  actor_id: str = None, region: str = "us-east-1"):
         """
-        Initialize Travel Orchestrator Agent with memory integration
+        Initialize Travel Orchestrator Agent with Gateway integration and memory
         
         Args:
             memory_id: AgentCore Memory resource ID (created if not provided)
@@ -91,6 +82,7 @@ class TravelOrchestratorAgent(Agent):
         # Store session info for tools
         self.session_id = session_id
         self.actor_id = actor_id
+        self.region = region
         
         logger.info(f"Initializing Travel Orchestrator - Session: {session_id}, Actor: {actor_id}")
         
@@ -108,6 +100,18 @@ class TravelOrchestratorAgent(Agent):
                 logger.error(f"Failed to initialize memory: {e}")
                 memory_hooks = None
         
+        # Initialize Gateway tools via MCP client (GitHub example pattern)
+        gateway_tools = self._initialize_gateway_tools(region)
+        
+        # Combine direct tools with Gateway tools
+        all_tools = (
+            [
+                self.search_flights,
+                self.search_accommodations, 
+            ]
+            + gateway_tools  # Add Google Maps tools from Gateway
+        )
+        
         # Initialize agent state for memory hooks
         agent_state = {
             "actor_id": actor_id,
@@ -117,15 +121,80 @@ class TravelOrchestratorAgent(Agent):
         
         super().__init__(
             model="us.amazon.nova-premier-v1:0",
-            tools=[
-                self.search_flights,
-                self.search_accommodations, 
-                self.search_restaurants
-            ],
+            tools=all_tools,
             system_prompt=self._build_system_prompt(current_datetime, current_date),
             hooks=[memory_hooks] if memory_hooks else [],
             state=agent_state
         )
+    
+    def _initialize_gateway_tools(self, region: str = "us-east-1") -> List:
+        """
+        Initialize Gateway tools via MCP client automatic discovery (GitHub example pattern)
+        
+        Args:
+            region: AWS region
+            
+        Returns:
+            List of discovered tools from Gateway
+        """
+        try:
+            # Get Gateway configuration from Parameter Store
+            gateway_url = get_parameter('/travel-agent/gateway-url')
+            gateway_client_id = get_parameter('/travel-agent/gateway-client-id')
+            gateway_client_secret = get_parameter('/travel-agent/gateway-client-secret')
+            
+            if not all([gateway_url, gateway_client_id, gateway_client_secret]):
+                logger.warning("⚠️  Gateway configuration not found in Parameter Store - Gateway tools disabled")
+                logger.warning("Deploy Gateway first with: ./deploy-travel-orchestrator.sh")
+                return []
+            
+            # Get access token for Gateway
+            from gateway_utils import get_token
+            user_pool_id = get_parameter('/travel-agent/gateway-user-pool-id')
+            
+            if not user_pool_id:
+                logger.warning("⚠️  Could not determine user pool ID for Gateway authentication")
+                return []
+            
+            scope_string = "travel-agent-gateway/gateway:read travel-agent-gateway/gateway:write"
+            token_response = get_token(user_pool_id, gateway_client_id, gateway_client_secret, scope_string, region)
+            access_token = token_response['access_token']
+            
+            logger.info("✅ Gateway authentication successful")
+            
+            # Create MCP transport function
+            def create_gateway_transport():
+                return streamablehttp_client(
+                    gateway_url,
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+            
+            # Initialize MCP client and start session (GitHub pattern)
+            self.mcp_client = MCPClient(create_gateway_transport)
+            
+            try:
+                self.mcp_client.start()  # Start persistent session
+                logger.info("✅ MCP client session started")
+                
+                gateway_tools = self.mcp_client.list_tools_sync()
+                logger.info(f"✅ Discovered {len(gateway_tools)} Google Maps tools from Gateway")
+                
+                # Log discovered tool names
+                for tool in gateway_tools:
+                    if hasattr(tool, 'name'):
+                        logger.info(f"  - {tool.name}")
+                
+                return gateway_tools
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to start MCP client session: {e}")
+                return []
+            
+        except Exception as e:
+            logger.warning(f"⚠️  Gateway tool discovery failed: {e}")
+            logger.warning("Continuing with direct tools only - Google Maps features will be limited")
+            return []
+    
     
     def _initialize_nova_act_api_key(self):
         """
@@ -266,11 +335,19 @@ class TravelOrchestratorAgent(Agent):
         """Build focused system prompt for travel orchestration with JSON response format"""
         return f"""You are a Travel Orchestrator Agent for travel planning. Current date: {current_datetime}
 
-YOUR ROLE: Coordinate specialist agents (flights, accommodations, restaurants) based on what users specifically request.
+YOUR ROLE: Coordinate specialist agents (flights, accommodations, restaurants) and Google Maps location services based on what users specifically request.
 
 **CRITICAL: YOU MUST ALWAYS RESPOND IN JSON FORMAT USING TravelOrchestratorResponse. NEVER PROVIDE PLAIN TEXT RESPONSES.**
 
 **CRITICAL: ONLY CALL TOOLS WHEN YOU HAVE ALL REQUIRED ARGUMENTS. DO NOT CALL TOOLS WITH MISSING OR INVALID PARAMETERS.**
+
+AVAILABLE TOOLS:
+
+Direct Tools (flights and accommodations):
+- search_flights: Find flight options with browser automation
+- search_accommodations: Find hotel/Airbnb options with browser automation  
+
+Gateway Tools - Additional tools are available via agentcore gateway, use them as needed.
 
 TOOL PARAMETER REQUIREMENTS:
 
@@ -288,8 +365,6 @@ search_accommodations:
 - passengers: OPTIONAL - Defaults to 2, must be 1-30 (number of guests)
 - rooms: OPTIONAL - Defaults to 1, must be 1-8
 
-search_restaurants:
-- destination: REQUIRED - Must be a city name (e.g., "Paris", "Tokyo")
 
 TOOL CALLING RULES:
 1. **ONLY call tools when you have ALL required parameters with valid values**
@@ -301,7 +376,6 @@ TOOL CALLING RULES:
 TOOL SELECTION RULES (Listen to what user asks for):
 - "flights" or "flight" → search_flights ONLY (if all required params available)
 - "hotels", "accommodations", "places to stay" → search_accommodations ONLY (if all required params available)
-- "restaurants", "food", "dining" → search_restaurants ONLY (if destination available)
 - "trip", "plan", "itinerary", "vacation", "complete travel plan" → CALL MULTIPLE TOOLS (if params available for each tool)
 
 MULTI-TOOL EXECUTION: When users request comprehensive planning, call all relevant tools that have sufficient parameters.
@@ -366,12 +440,6 @@ When multiple tools complete (comprehensive planning):
       "display_name": "Finding accommodations",
       "status": "completed",
       "result_preview": "Found 15 hotel options"
-    }},
-    {{
-      "tool_id": "search_restaurants",
-      "display_name": "Finding restaurants", 
-      "status": "completed",
-      "result_preview": "Found 12 restaurant recommendations"
     }}
   ],
   "flight_results": {{ ... }},
@@ -402,7 +470,7 @@ When tool fails:
 
 CONVERSATION CONTEXT: Remember previous messages to avoid asking for information already provided.
 VALIDATION: Reject past dates (before {current_date}). Today is acceptable.
-REMEMBER: Always respond in JSON using TravelOrchestratorResponse format. For comprehensive requests, call multiple tools and let Strands handle concurrent execution."""
+REMEMBER: Always respond in JSON using the following schema - {TravelOrchestratorResponse.model_json_schema()} """
 
 
     @tool
@@ -531,61 +599,6 @@ REMEMBER: Always respond in JSON using TravelOrchestratorResponse format. For co
                 error_message=str(e),
                 processing_time_seconds=0
             )
-
-    @tool
-    def search_restaurants(self, destination: str) -> TravelOrchestratorResponse:
-        """
-        Search for restaurants using standardized parameters
-        
-        Args:
-            destination: Destination city for restaurant search
-        
-        Returns:
-            TravelOrchestratorResponse with restaurant search results or validation error
-        """
-        # Validate parameters using dedicated validation method
-        validation_errors = self._validate_restaurant_params(destination)
-        
-        # Return validation error if parameters are invalid
-        if validation_errors:
-            validation_progress = create_tool_progress("search_restaurants", {"destination": destination}, "failed")
-            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
-            
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.CONVERSATION,
-                response_status=ResponseStatus.VALIDATION_ERROR,
-                message=f"I need more information to search for restaurants. Missing: {', '.join(validation_errors)}",
-                overall_progress_message="Restaurant search needs more details",
-                is_final_response=False,
-                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
-                tool_progress=[validation_progress],
-                success=False,
-                error_message=f"Missing parameters: {', '.join(validation_errors)}",
-                processing_time_seconds=0
-            )
-        
-        print(f"🍽️  Restaurant search requested for: {destination}")
-        
-        # Create progress tracking for this tool
-        restaurant_progress = create_tool_progress(
-            "search_restaurants", 
-            {"destination": destination}, 
-            "failed"
-        )
-        restaurant_progress.error_message = "Restaurant search not yet implemented in direct tool architecture"
-        
-        return TravelOrchestratorResponse(
-            response_type=ResponseType.CONVERSATION,
-            response_status=ResponseStatus.TOOL_ERROR,
-            message="Restaurant search functionality is currently being refactored. Please focus on flight and accommodation searches for now.",
-            overall_progress_message="Restaurant search not yet available",
-            is_final_response=True,
-            tool_progress=[restaurant_progress],
-            success=False,
-            error_message="Restaurant search not yet implemented in direct tool architecture",
-            processing_time_seconds=0
-        )
-
 
 
 # Bedrock AgentCore integration
