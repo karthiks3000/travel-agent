@@ -7,10 +7,11 @@ from enum import Enum
 from datetime import datetime
 
 # Import specialist agent response models using relative imports within common
-from .flight_models import FlightSearchResults
-from .accommodation_models import AccommodationAgentResponse
-from .food_models import RestaurantSearchResults
+from .flight_models import FlightSearchResults, FlightResult
+from .accommodation_models import AccommodationAgentResponse, PropertyResult
+from .food_models import RestaurantSearchResults, RestaurantResult
 from .travel_models import ComprehensiveTravelPlan
+from .itinerary_models import TravelItinerary, AttractionResult
 
 
 class ResponseType(str, Enum):
@@ -19,6 +20,8 @@ class ResponseType(str, Enum):
     FLIGHTS = "flights"               # Flight search results only
     ACCOMMODATIONS = "accommodations" # Accommodation search results only
     RESTAURANTS = "restaurants"       # Restaurant search results only
+    ATTRACTIONS = "attractions"       # Attraction search results only
+    MIXED_RESULTS = "mixed_results"   # Multiple component types (flights + hotels, etc.)
     ITINERARY = "itinerary"          # Complete travel plan with multiple components
 
 
@@ -94,24 +97,38 @@ class TravelOrchestratorResponse(BaseModel):
         description="Progress tracking for all tools being executed"
     )
     
-    # Structured data from specialist agents
-    flight_results: Optional[FlightSearchResults] = Field(
+    # Enhanced structured data - supports multiple results and new components
+    flight_results: Optional[List[FlightResult]] = Field(
         None, 
-        description="Structured flight search results from flight agent"
+        description="Flight search results (1-10 options based on user request)"
     )
-    accommodation_results: Optional[AccommodationAgentResponse] = Field(
+    accommodation_results: Optional[List[PropertyResult]] = Field(
         None, 
-        description="Structured accommodation search results from accommodation agent"
+        description="Accommodation search results (1-10 options based on user request)"
     )
-    restaurant_results: Optional[RestaurantSearchResults] = Field(
+    restaurant_results: Optional[List[RestaurantResult]] = Field(
         None, 
-        description="Structured restaurant search results from food agent"
+        description="Restaurant search results from Google Places API"
+    )
+    attraction_results: Optional[List[AttractionResult]] = Field(
+        None, 
+        description="Attraction search results from Google Places API"
     )
     
     # Complete travel planning
-    comprehensive_plan: Optional[ComprehensiveTravelPlan] = Field(
+    itinerary: Optional[TravelItinerary] = Field(
         None, 
-        description="Complete travel plan when response_type is 'itinerary'"
+        description="Complete day-by-day travel itinerary when response_type is 'itinerary'"
+    )
+    
+    # Legacy support for existing integrations
+    legacy_flight_results: Optional[FlightSearchResults] = Field(
+        None, 
+        description="Legacy flight results format (deprecated - use flight_results)"
+    )
+    legacy_accommodation_results: Optional[AccommodationAgentResponse] = Field(
+        None, 
+        description="Legacy accommodation results format (deprecated - use accommodation_results)"
     )
     
     # Additional response metadata
@@ -137,19 +154,19 @@ class TravelOrchestratorResponse(BaseModel):
         components = []
         
         if self.flight_results:
-            if hasattr(self.flight_results, 'best_outbound_flight') and self.flight_results.best_outbound_flight:
-                components.append("flights")
+            components.append(f"{len(self.flight_results)} flights")
         
         if self.accommodation_results:
-            if hasattr(self.accommodation_results, 'best_accommodations') and self.accommodation_results.best_accommodations:
-                components.append(f"{len(self.accommodation_results.best_accommodations)} accommodations")
+            components.append(f"{len(self.accommodation_results)} accommodations")
         
         if self.restaurant_results:
-            if hasattr(self.restaurant_results, 'restaurants') and self.restaurant_results.restaurants:
-                components.append(f"{len(self.restaurant_results.restaurants)} restaurants")
+            components.append(f"{len(self.restaurant_results)} restaurants")
         
-        if self.comprehensive_plan:
-            components.append("comprehensive plan")
+        if self.attraction_results:
+            components.append(f"{len(self.attraction_results)} attractions")
+        
+        if self.itinerary:
+            components.append("complete itinerary")
         
         component_str = ", ".join(components) if components else "conversation only"
         return f"{self.response_type.value} response with {component_str} (status: {self.response_status.value})"
@@ -167,7 +184,7 @@ class TravelOrchestratorResponse(BaseModel):
             self.flight_results is not None,
             self.accommodation_results is not None,
             self.restaurant_results is not None,
-            self.comprehensive_plan is not None
+            self.itinerary is not None
         ])
     
     def get_completed_tools_count(self) -> int:
@@ -271,14 +288,16 @@ class AgentResponseParser:
             return None
 
 
-def create_tool_progress(tool_id: str, travel_info: dict = None, status: str = "pending") -> ToolProgress:
+def create_tool_progress(tool_id: str, travel_info: Optional[Dict[str, Any]] = None, status: Literal["pending", "active", "completed", "failed"] = "pending") -> ToolProgress:
     """Helper function to create user-friendly tool progress objects"""
     if tool_id not in TOOL_DISPLAY_MAPPING:
         return ToolProgress(
             tool_id=tool_id,
             display_name=tool_id.replace("_", " ").title(),
             description=f"Executing {tool_id}",
-            status=status
+            status=status,
+            result_preview=None,
+            error_message=None
         )
     
     mapping = TOOL_DISPLAY_MAPPING[tool_id]
@@ -296,5 +315,7 @@ def create_tool_progress(tool_id: str, travel_info: dict = None, status: str = "
         tool_id=tool_id,
         display_name=mapping["display_name"],
         description=description,
-        status=status
+        status=status,
+        result_preview=None,
+        error_message=None
     )

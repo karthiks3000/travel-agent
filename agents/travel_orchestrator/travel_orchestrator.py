@@ -22,6 +22,11 @@ from tools.memory_hooks import TravelMemoryHook, generate_session_ids
 from common.models.orchestrator_models import (
     TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
 )
+from common.models.flight_models import FlightResult
+from common.models.accommodation_models import PropertyResult
+from common.models.food_models import RestaurantResult
+from common.models.itinerary_models import AttractionResult
+from tools.itinerary_generator import generate_comprehensive_itinerary, TripComponents
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -64,8 +69,8 @@ def extract_user_id_from_context(context) -> str:
 
 
 class TravelOrchestratorAgent(Agent):
-    def __init__(self, memory_id: str = None, session_id: str = None, 
-                 actor_id: str = None, region: str = "us-east-1"):
+    def __init__(self, memory_id: Optional[str] = None, session_id: Optional[str] = None, 
+                 actor_id: Optional[str] = None, region: str = "us-east-1"):
         """
         Initialize Travel Orchestrator Agent with Gateway integration and memory
         
@@ -103,11 +108,14 @@ class TravelOrchestratorAgent(Agent):
         # Initialize Gateway tools via MCP client (GitHub example pattern)
         gateway_tools = self._initialize_gateway_tools(region)
         
-        # Combine direct tools with Gateway tools
+        # Combine direct tools with Gateway tools and new enhanced tools
         all_tools = (
             [
                 self.search_flights,
-                self.search_accommodations, 
+                self.search_accommodations,
+                self.search_restaurants,
+                self.search_attractions,
+                self.create_comprehensive_itinerary
             ]
             + gateway_tools  # Add Google Maps tools from Gateway
         )
@@ -157,6 +165,12 @@ class TravelOrchestratorAgent(Agent):
                 return []
             
             scope_string = "travel-agent-gateway/gateway:read travel-agent-gateway/gateway:write"
+            
+            # Ensure all parameters are strings before passing to get_token
+            if not isinstance(user_pool_id, str) or not isinstance(gateway_client_id, str) or not isinstance(gateway_client_secret, str):
+                logger.warning("⚠️  Invalid Gateway configuration types")
+                return []
+                
             token_response = get_token(user_pool_id, gateway_client_id, gateway_client_secret, scope_string, region)
             access_token = token_response['access_token']
             
@@ -164,6 +178,9 @@ class TravelOrchestratorAgent(Agent):
             
             # Create MCP transport function
             def create_gateway_transport():
+                # Ensure gateway_url is a string
+                if not isinstance(gateway_url, str):
+                    raise ValueError("Gateway URL is not a valid string")
                 return streamablehttp_client(
                     gateway_url,
                     headers={"Authorization": f"Bearer {access_token}"}
@@ -332,145 +349,191 @@ class TravelOrchestratorAgent(Agent):
         return missing_params
 
     def _build_system_prompt(self, current_datetime: str, current_date: str) -> str:
-        """Build focused system prompt for travel orchestration with JSON response format"""
-        return f"""You are a Travel Orchestrator Agent for travel planning. Current date: {current_datetime}
+        """Build enhanced system prompt for comprehensive travel orchestration with JSON response format"""
+        return f"""You are an Expert Travel Planning Agent. Current date: {current_datetime}
 
-YOUR ROLE: Coordinate specialist agents (flights, accommodations, restaurants) and Google Maps location services based on what users specifically request.
+YOUR ROLE: Create comprehensive travel plans by coordinating flight searches, accommodation searches, and Google Places API for restaurants and attractions.
 
-**CRITICAL: YOU MUST ALWAYS RESPOND IN JSON FORMAT USING TravelOrchestratorResponse. NEVER PROVIDE PLAIN TEXT RESPONSES.**
-
-**CRITICAL: ONLY CALL TOOLS WHEN YOU HAVE ALL REQUIRED ARGUMENTS. DO NOT CALL TOOLS WITH MISSING OR INVALID PARAMETERS.**
+**CRITICAL: ALWAYS RESPOND IN JSON FORMAT USING TravelOrchestratorResponse**
 
 AVAILABLE TOOLS:
+- search_flights: Find flight options (returns multiple results based on request)
+- search_accommodations: Find accommodation options (returns multiple results based on request)  
+- searchPlacesByText: Google Places text search for restaurants and attractions
+- searchNearbyPlaces: Google Places nearby search for locations around specific points
+- getPlaceDetails: Get detailed information about specific places
+- create_comprehensive_itinerary: Generate complete day-by-day travel plans
 
-Direct Tools (flights and accommodations):
-- search_flights: Find flight options with browser automation
-- search_accommodations: Find hotel/Airbnb options with browser automation  
+REQUEST TYPE DETECTION - Listen carefully to what users want:
 
-Gateway Tools - Additional tools are available via agentcore gateway, use them as needed.
+1. **SPECIFIC BEST OPTIONS**: "best flight", "cheapest hotel", "top-rated restaurant"
+   → Call appropriate tools and return 1 result
+   → response_type: "flights", "accommodations", "restaurants", or "attractions"
 
-TOOL PARAMETER REQUIREMENTS:
+2. **MULTIPLE OPTIONS**: "show me 5 flights", "give me hotel options under $200", "find 3 Italian restaurants"
+   → Call appropriate tools and return multiple results (2-10)
+   → response_type: "flights", "accommodations", "restaurants", or "attractions"
+
+3. **MIXED REQUESTS**: "flights and hotels to Paris", "restaurants and attractions in Rome"
+   → Call multiple tools and return multiple component types
+   → response_type: "mixed_results"
+
+4. **COMPREHENSIVE PLANNING**: "plan my trip", "create itinerary", "7-day vacation plan"
+   → Use create_comprehensive_itinerary tool
+   → response_type: "itinerary"
+
+INTELLIGENT GOOGLE PLACES API USAGE:
+
+For Restaurant Searches:
+- Call searchPlacesByText with query like "Italian restaurants in Paris"
+- Use type="restaurant" parameter
+- Apply price filters: minprice/maxprice (0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)
+- Parse results and format into RestaurantResult objects with all required fields
+- Return in restaurant_results array
+
+For Attraction Searches:
+- Call searchPlacesByText with query like "museums in Paris" or "attractions in Rome"  
+- Use type="tourist_attraction" parameter
+- Parse results and format into AttractionResult objects with all required fields
+- Estimate visit_duration_estimate based on place types (museums=120min, parks=60min, etc.)
+- Return in attraction_results array
+
+GOOGLE PLACES RESPONSE FORMATTING:
+When you call Google Places APIs, format the responses into our Pydantic models:
+
+RestaurantResult format:
+{{
+  "name": "Restaurant Name",
+  "address": "Full Address", 
+  "rating": 4.5,
+  "user_rating_count": 1250,
+  "price_level": "PRICE_LEVEL_MODERATE",
+  "phone_number": "+33123456789",
+  "website_uri": "https://restaurant.com",
+  "is_open_now": true,
+  "types": ["restaurant", "french_restaurant"],
+  "place_id": "ChIJxxxxxx"
+}}
+
+AttractionResult format:
+{{
+  "name": "Attraction Name",
+  "place_id": "ChIJxxxxxx", 
+  "formatted_address": "Full Address",
+  "rating": 4.8,
+  "user_ratings_total": 25000,
+  "price_level": 2,
+  "types": ["tourist_attraction", "museum"],
+  "opening_hours": {{"open_now": true}},
+  "website": "https://attraction.com",
+  "visit_duration_estimate": 120
+}}
+
+PARAMETER REQUIREMENTS:
 
 search_flights:
-- origin: REQUIRED - Must be a city name or airport code (e.g., "New York", "Toronto", "JFK")
-- destination: REQUIRED - Must be a city name or airport code (e.g., "Paris", "London", "CDG") 
-- departure_date: REQUIRED - Must be in YYYY-MM-DD format (e.g., "2024-10-15")
+- origin: REQUIRED - Must be a city name or airport code
+- destination: REQUIRED - Must be a city name or airport code
+- departure_date: REQUIRED - Must be in YYYY-MM-DD format
 - return_date: OPTIONAL - Must be in YYYY-MM-DD format, after departure_date
 - passengers: OPTIONAL - Defaults to 1, must be 1-9
 
 search_accommodations:
-- destination: REQUIRED - Must be a city name (e.g., "Paris", "Tokyo")
+- destination: REQUIRED - Must be a city name
 - departure_date: REQUIRED - Check-in date in YYYY-MM-DD format
 - return_date: REQUIRED - Check-out date in YYYY-MM-DD format, after departure_date
 - passengers: OPTIONAL - Defaults to 2, must be 1-30 (number of guests)
 - rooms: OPTIONAL - Defaults to 1, must be 1-8
 
+search_restaurants:
+- destination: REQUIRED - Must be a city name
+- cuisine_type: OPTIONAL - Type of cuisine (e.g., "Italian", "seafood")
+- price_range: OPTIONAL - "budget", "moderate", "expensive", "luxury"
+- max_results: OPTIONAL - Defaults to 5, must be 1-10
+
+search_attractions:
+- destination: REQUIRED - Must be a city name
+- attraction_types: OPTIONAL - List of types (e.g., ["museum", "park"])
+- max_results: OPTIONAL - Defaults to 5, must be 1-10
+
+create_comprehensive_itinerary:
+- destination: REQUIRED - Destination city
+- origin: REQUIRED - Origin city
+- departure_date: REQUIRED - Trip start date in YYYY-MM-DD format
+- return_date: REQUIRED - Trip end date in YYYY-MM-DD format
+- traveler_count: OPTIONAL - Defaults to 2, must be 1-10
 
 TOOL CALLING RULES:
 1. **ONLY call tools when you have ALL required parameters with valid values**
-2. **Origin/destination MUST be actual city names or airport codes** (not generic terms like "there" or "home"). if not provided ask the user for the city name instead of assuming one.
+2. **Origin/destination MUST be actual city names or airport codes** (not generic terms)
 3. **Dates MUST be in proper YYYY-MM-DD format** (not relative terms like "next week")
-4. **If any required parameter is missing or invalid, ask the user for clarification instead of calling the tool**
+4. **If any required parameter is missing or invalid, ask the user for clarification**
 5. **Use conversation context to fill in missing details when possible**
 
-TOOL SELECTION RULES (Listen to what user asks for):
-- "flights" or "flight" → search_flights ONLY (if all required params available)
-- "hotels", "accommodations", "places to stay" → search_accommodations ONLY (if all required params available)
-- "trip", "plan", "itinerary", "vacation", "complete travel plan" → CALL MULTIPLE TOOLS (if params available for each tool)
+RESPONSE FORMATS:
 
-MULTI-TOOL EXECUTION: When users request comprehensive planning, call all relevant tools that have sufficient parameters.
-
-PARAMETER INFERENCE: Use conversation context to infer missing parameters, but only call tools when you have complete, valid parameter sets.
-
-MANDATORY JSON RESPONSE FORMAT - ALL responses must use TravelOrchestratorResponse structure:
-
-When asking for information:
-
-{{
-  "response_type": "conversation",
-  "response_status": "requesting_info", 
-  "message": "I need your departure city and travel dates to search for flights.",
-  "overall_progress_message": "Waiting for travel details",
-  "is_final_response": false,
-  "next_expected_input_friendly": "Please provide departure city and travel dates",
-  "tool_progress": [],
-  "success": true
-}}
-
-
-When single tool completes successfully:
-
+Single Component (flights only):
 {{
   "response_type": "flights",
-  "response_status": "complete_success",
-  "message": "Found 12 flight options for your NYC to Paris trip.",
-  "overall_progress_message": "Flight search completed successfully", 
-  "is_final_response": true,
-  "tool_progress": [{{
-    "tool_id": "search_flights",
-    "display_name": "Finding flights",
-    "description": "Searching for flights from NYC to Paris",
-    "status": "completed",
-    "result_preview": "Found 12 flight options starting at $245"
-  }}],
-  "flight_results": {{ ... }},
-  "estimated_costs": {{"flights": 490}},
-  "processing_time_seconds": 15.2,
+  "message": "Found 5 flight options for your NYC to Paris trip.",
+  "flight_results": [FlightResult, FlightResult, ...],
+  "estimated_costs": {{"flights": 890}},
   "success": true
 }}
 
+Mixed Components:
+{{
+  "response_type": "mixed_results", 
+  "message": "Found flights, hotels, and restaurants for your Paris trip.",
+  "flight_results": [FlightResult, ...],
+  "accommodation_results": [PropertyResult, ...],
+  "restaurant_results": [RestaurantResult, ...],
+  "success": true
+}}
 
-When multiple tools complete (comprehensive planning):
-
+Full Itinerary:
 {{
   "response_type": "itinerary",
-  "response_status": "complete_success",
-  "message": "Created your complete travel plan with flights, accommodations, and restaurant recommendations.",
-  "overall_progress_message": "Complete travel plan generated successfully", 
-  "is_final_response": true,
-  "tool_progress": [
-    {{
-      "tool_id": "search_flights",
-      "display_name": "Finding flights",
-      "status": "completed",
-      "result_preview": "Found 8 flight options"
-    }},
-    {{
-      "tool_id": "search_accommodations", 
-      "display_name": "Finding accommodations",
-      "status": "completed",
-      "result_preview": "Found 15 hotel options"
-    }}
-  ],
-  "flight_results": {{ ... }},
-  "accommodation_results": {{ ... }},
-  "restaurant_results": {{ ... }},
-  "processing_time_seconds": 45.8,
+  "message": "Created your complete 7-day Paris itinerary.",
+  "itinerary": {{
+    "trip_title": "7-Day Paris Adventure",
+    "daily_itineraries": [
+      {{
+        "day_number": 1,
+        "date": "2024-06-15",
+        "location": "Paris",
+        "daily_summary": "Arrival and Eiffel Tower visit",
+        "activities": [
+          {{
+            "time_slot": {{"start_time": "09:00", "end_time": "11:30"}},
+            "activity_type": "flight",
+            "title": "Arrive in Paris",
+            "activity_details": {{/* FlightResult */}},
+            "notes": "Land at CDG, allow time for customs"
+          }},
+          {{
+            "time_slot": {{"start_time": "12:30", "duration_minutes": 90}},
+            "activity_type": "restaurant", 
+            "title": "Lunch at Café de Flore",
+            "activity_details": {{/* RestaurantResult */}},
+            "notes": "Classic Parisian bistro experience"
+          }}
+        ]
+      }}
+    ]
+  }},
   "success": true
 }}
 
+CONVERSATION FLOW:
+- If missing required parameters, ask specific questions
+- Use context from previous messages to fill gaps
+- Validate dates (no past dates except today: {current_date})
+- Provide helpful travel planning advice
 
-When tool fails:
-{{
-  "response_type": "conversation",
-  "response_status": "tool_error",
-  "message": "I couldn't find flights for those dates. Please try different dates or check the details.",
-  "overall_progress_message": "Flight search failed",
-  "is_final_response": true,
-  "tool_progress": [{{
-    "tool_id": "search_flights", 
-    "display_name": "Finding flights",
-    "status": "failed",
-    "error_message": "No flights available for selected dates"
-  }}],
-  "success": false,
-  "error_message": "Flight search returned no results"
-}}
+Always be a professional travel planner - knowledgeable, helpful, and detail-oriented.
 
-
-CONVERSATION CONTEXT: Remember previous messages to avoid asking for information already provided.
-VALIDATION: Reject past dates (before {current_date}). Today is acceptable.
-REMEMBER: Always respond in JSON using the following schema - {TravelOrchestratorResponse.model_json_schema()} """
+REMEMBER: Always respond in JSON using the following schema - {TravelOrchestratorResponse.model_json_schema()}"""
 
 
     @tool
@@ -507,7 +570,17 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 tool_progress=[validation_progress],
                 success=False,
                 error_message=f"Missing parameters: {', '.join(validation_errors)}",
-                processing_time_seconds=0
+                processing_time_seconds=0,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
         
         print(f"✈️  Direct flight search: {origin} → {destination} on {departure_date}")
@@ -534,7 +607,18 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 tool_progress=[flight_progress],
                 success=False,
                 error_message=str(e),
-                processing_time_seconds=0
+                processing_time_seconds=0,
+                next_expected_input_friendly=None,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
 
     @tool
@@ -572,7 +656,17 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 tool_progress=[validation_progress],
                 success=False,
                 error_message=f"Missing parameters: {', '.join(validation_errors)}",
-                processing_time_seconds=0
+                processing_time_seconds=0,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
         
         print(f"🏨 Direct accommodation search: {destination} | {departure_date} to {return_date} | {passengers} guests, {rooms} rooms")
@@ -597,7 +691,292 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 tool_progress=[accommodation_progress],
                 success=False,
                 error_message=str(e),
-                processing_time_seconds=0
+                processing_time_seconds=0,
+                next_expected_input_friendly=None,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
+            )
+
+    @tool
+    def search_restaurants(self, destination: str, cuisine_type: Optional[str] = None, 
+                          price_range: Optional[str] = None, max_results: int = 5) -> TravelOrchestratorResponse:
+        """
+        Search for restaurants using Google Places API via MCP Gateway
+        
+        Args:
+            destination: Destination city or location (e.g., 'Paris', 'Manhattan, NYC')
+            cuisine_type: Type of cuisine (e.g., "Italian", "seafood", "vegetarian")
+            price_range: Price preference ("budget", "moderate", "expensive", "luxury")
+            max_results: Maximum number of results to return (1-10)
+        
+        Returns:
+            TravelOrchestratorResponse with restaurant results
+        """
+        # Validate parameters
+        validation_errors = self._validate_restaurant_params(destination)
+        
+        if validation_errors:
+            validation_progress = create_tool_progress("search_restaurants", {"destination": destination}, "failed")
+            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
+            
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.VALIDATION_ERROR,
+                message=f"I need more information to search for restaurants. Missing: {', '.join(validation_errors)}",
+                overall_progress_message="Restaurant search needs more details",
+                is_final_response=False,
+                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
+                tool_progress=[validation_progress],
+                success=False,
+                error_message=f"Missing parameters: {', '.join(validation_errors)}",
+                processing_time_seconds=0,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
+            )
+        
+        print(f"🍽️ Restaurant search: {destination} | {cuisine_type or 'any cuisine'} | {price_range or 'any price'}")
+        
+        # This tool now lets the AI use Google Places API directly via MCP Gateway
+        # The AI should call searchPlacesByText or other Google Places tools directly
+        # and format the results into RestaurantResult objects
+        return TravelOrchestratorResponse(
+            response_type=ResponseType.CONVERSATION,
+            response_status=ResponseStatus.REQUESTING_INFO,
+            message=f"I'll search for {cuisine_type or 'any'} restaurants in {destination}. Let me use the Google Places API to find the best options for you.",
+            overall_progress_message="Ready to search for restaurants",
+            is_final_response=False,
+            success=True,
+            processing_time_seconds=0,
+            error_message=None,
+            next_expected_input_friendly=None,
+            flight_results=None,
+            accommodation_results=None,
+            restaurant_results=None,
+            attraction_results=None,
+            itinerary=None,
+            legacy_flight_results=None,
+            legacy_accommodation_results=None,
+            estimated_costs=None,
+            recommendations=None,
+            session_metadata=None
+        )
+
+    @tool
+    def search_attractions(self, destination: str, attraction_types: Optional[List[str]] = None, 
+                          max_results: int = 5) -> TravelOrchestratorResponse:
+        """
+        Search for attractions using Google Places API via MCP Gateway
+        
+        Args:
+            destination: Destination city or location (e.g., 'Paris', 'Manhattan, NYC')
+            attraction_types: Types of attractions (e.g., ["museum", "park", "monument"])
+            max_results: Maximum number of results to return (1-10)
+        
+        Returns:
+            TravelOrchestratorResponse with attraction results
+        """
+        # Validate parameters
+        validation_errors = self._validate_restaurant_params(destination)  # Same validation as restaurants
+        
+        if validation_errors:
+            validation_progress = create_tool_progress("search_attractions", {"destination": destination}, "failed")
+            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
+            
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.VALIDATION_ERROR,
+                message=f"I need more information to search for attractions. Missing: {', '.join(validation_errors)}",
+                overall_progress_message="Attraction search needs more details",
+                is_final_response=False,
+                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
+                tool_progress=[validation_progress],
+                success=False,
+                error_message=f"Missing parameters: {', '.join(validation_errors)}",
+                processing_time_seconds=0,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
+            )
+        
+        print(f"🏛️ Attraction search: {destination} | {attraction_types or 'all types'}")
+        
+        # This tool now lets the AI use Google Places API directly via MCP Gateway
+        # The AI should call searchPlacesByText or other Google Places tools directly
+        # and format the results into AttractionResult objects
+        return TravelOrchestratorResponse(
+            response_type=ResponseType.CONVERSATION,
+            response_status=ResponseStatus.REQUESTING_INFO,
+            message=f"I'll search for {', '.join(attraction_types) if attraction_types else 'popular'} attractions in {destination}. Let me use the Google Places API to find the best options for you.",
+            overall_progress_message="Ready to search for attractions",
+            is_final_response=False,
+            success=True,
+            processing_time_seconds=0,
+            error_message=None,
+            next_expected_input_friendly=None,
+            flight_results=None,
+            accommodation_results=None,
+            restaurant_results=None,
+            attraction_results=None,
+            itinerary=None,
+            legacy_flight_results=None,
+            legacy_accommodation_results=None,
+            estimated_costs=None,
+            recommendations=None,
+            session_metadata=None
+        )
+
+    @tool
+    def create_comprehensive_itinerary(self, destination: str, origin: str, departure_date: str, 
+                                     return_date: str, traveler_count: int = 2) -> TravelOrchestratorResponse:
+        """
+        Create a comprehensive day-by-day travel itinerary with flights, accommodations, restaurants, and attractions
+        
+        Args:
+            destination: Destination city (e.g., 'Paris', 'Tokyo')
+            origin: Origin city (e.g., 'New York', 'Los Angeles')
+            departure_date: Trip start date in YYYY-MM-DD format
+            return_date: Trip end date in YYYY-MM-DD format
+            traveler_count: Number of travelers (1-10)
+        
+        Returns:
+            TravelOrchestratorResponse with complete itinerary
+        """
+        from datetime import datetime, date
+        
+        print(f"🗓️ Creating comprehensive itinerary: {origin} → {destination} | {departure_date} to {return_date} | {traveler_count} travelers")
+        
+        try:
+            # Parse dates
+            start_date = datetime.strptime(departure_date, "%Y-%m-%d").date()
+            end_date = datetime.strptime(return_date, "%Y-%m-%d").date()
+            
+            # Collect all trip components by calling individual search tools
+            trip_components = TripComponents()
+            
+            # Search for flights
+            print("🔍 Gathering flight options...")
+            flight_response = self.search_flights(
+                origin=origin, 
+                destination=destination, 
+                departure_date=departure_date, 
+                return_date=return_date, 
+                passengers=traveler_count
+            )
+            if flight_response.success and flight_response.flight_results:
+                # Convert legacy format to new format if needed
+                if hasattr(flight_response, 'legacy_flight_results') and flight_response.legacy_flight_results:
+                    # Extract flights from legacy format
+                    legacy_results = flight_response.legacy_flight_results
+                    if hasattr(legacy_results, 'best_outbound_flight') and legacy_results.best_outbound_flight:
+                        trip_components.flights.append(legacy_results.best_outbound_flight)
+                    if hasattr(legacy_results, 'best_return_flight') and legacy_results.best_return_flight:
+                        trip_components.flights.append(legacy_results.best_return_flight)
+                else:
+                    trip_components.flights = flight_response.flight_results or []
+            
+            # Search for accommodations
+            print("🔍 Gathering accommodation options...")
+            accommodation_response = self.search_accommodations(
+                destination=destination, 
+                departure_date=departure_date, 
+                return_date=return_date, 
+                passengers=traveler_count
+            )
+            if accommodation_response.success and accommodation_response.accommodation_results:
+                trip_components.accommodations = accommodation_response.accommodation_results or []
+            
+            # Search for restaurants (if MCP available)
+            print("🔍 Gathering restaurant recommendations...")
+            restaurant_response = self.search_restaurants(destination=destination, max_results=8)
+            if restaurant_response.success and restaurant_response.restaurant_results:
+                trip_components.restaurants = restaurant_response.restaurant_results or []
+            
+            # Search for attractions (if MCP available)
+            print("🔍 Gathering attraction recommendations...")
+            attraction_response = self.search_attractions(destination=destination, max_results=6)
+            if attraction_response.success and attraction_response.attraction_results:
+                trip_components.attractions = attraction_response.attraction_results or []
+            
+            # Generate comprehensive itinerary
+            print("📋 Generating day-by-day itinerary...")
+            return generate_comprehensive_itinerary(
+                destination=destination,
+                origin=origin,
+                start_date=start_date,
+                end_date=end_date,
+                traveler_count=traveler_count,
+                trip_components=trip_components
+            )
+            
+        except ValueError as e:
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.VALIDATION_ERROR,
+                message=f"Invalid date format. Please use YYYY-MM-DD format for dates.",
+                overall_progress_message="Date validation failed",
+                is_final_response=True,
+                success=False,
+                error_message=f"Date parsing error: {str(e)}",
+                processing_time_seconds=0,
+                next_expected_input_friendly=None,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
+            )
+        
+        except Exception as e:
+            print(f"❌ Comprehensive itinerary generation failed: {str(e)}")
+            
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.SYSTEM_ERROR,
+                message="I encountered an error while creating your comprehensive itinerary. Please try again.",
+                overall_progress_message="Itinerary generation failed",
+                is_final_response=True,
+                success=False,
+                error_message=str(e),
+                processing_time_seconds=0,
+                next_expected_input_friendly=None,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
 
 
@@ -681,7 +1060,7 @@ def parse_agent_response(result) -> dict:
             "error": f"Response parsing failed: {str(e)}"
         }
 
-def initialize_memory(region: str = "us-east-1") -> str:
+def initialize_memory(region: str = "us-east-1") -> Optional[str]:
     """Initialize shared short-term memory resource for travel planning"""
     global MEMORY_ID, MEMORY_CLIENT
     
@@ -769,7 +1148,7 @@ def travel_orchestrator_invocation(payload, context=None):
         # Create agent instance with session-specific configuration
         agent = TravelOrchestratorAgent(
             memory_id=memory_id,
-            session_id=session_id,
+            session_id=session_id if isinstance(session_id, str) else str(session_id) if session_id else "anonymous",
             actor_id=actor_id,
             region=region
         )

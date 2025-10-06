@@ -111,6 +111,13 @@ Return the complete flight search results in the proper schema format with all r
             # Create FlightSearchResults from browser automation result
             flight_results = FlightSearchResults(**result)
             
+            # Extract individual flight results into a list for the new flight_results field
+            flight_list = []
+            if flight_results.best_outbound_flight:
+                flight_list.append(flight_results.best_outbound_flight)
+            if flight_results.best_return_flight:
+                flight_list.append(flight_results.best_return_flight)
+            
             # Update progress to completed
             flight_progress.status = "completed"
             flight_progress.result_preview = f"Found flight options from {origin} to {destination}"
@@ -130,8 +137,20 @@ Return the complete flight search results in the proper schema format with all r
                 overall_progress_message="Flight search completed successfully",
                 is_final_response=True,
                 tool_progress=[flight_progress],
-                flight_results=flight_results,
-                processing_time_seconds=processing_time
+                flight_results=flight_list,  # Pass list of FlightResult objects
+                legacy_flight_results=flight_results,  # Keep legacy format for backwards compatibility
+                processing_time_seconds=processing_time,
+                success=True,
+                error_message=None,
+                next_expected_input_friendly=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
         else:
             # Browser automation failed or returned no results
@@ -147,7 +166,18 @@ Return the complete flight search results in the proper schema format with all r
                 tool_progress=[flight_progress],
                 success=False,
                 processing_time_seconds=processing_time,
-                error_message=result.get("error", "No results found")
+                error_message=result.get("error", "No results found"),
+                next_expected_input_friendly=None,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                legacy_flight_results=None,
+                legacy_accommodation_results=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
             
     except Exception as e:
@@ -167,5 +197,16 @@ Return the complete flight search results in the proper schema format with all r
             tool_progress=[flight_progress],
             success=False,
             error_message=str(e),
-            processing_time_seconds=processing_time
+            processing_time_seconds=processing_time,
+            next_expected_input_friendly=None,
+            flight_results=None,
+            accommodation_results=None,
+            restaurant_results=None,
+            attraction_results=None,
+            itinerary=None,
+            legacy_flight_results=None,
+            legacy_accommodation_results=None,
+            estimated_costs=None,
+            recommendations=None,
+            session_metadata=None
         )

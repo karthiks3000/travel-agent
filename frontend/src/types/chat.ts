@@ -37,6 +37,16 @@ export type ResponseStatus =
   | 'validation_error'          // Invalid input provided
   | 'system_error';             // General system failure
 
+// Enhanced response types
+export type ResponseType = 
+  | 'conversation'      // Simple Q&A, validation errors, clarifications
+  | 'flights'           // Flight search results only
+  | 'accommodations'    // Accommodation search results only
+  | 'restaurants'       // Restaurant search results only
+  | 'attractions'       // Attraction search results only
+  | 'mixed_results'     // Multiple component types
+  | 'itinerary';        // Complete travel plan with multiple components
+
 // Tool progress tracking
 export interface ToolProgress {
   tool_id: string;              // Internal tool identifier
@@ -48,7 +58,7 @@ export interface ToolProgress {
 }
 
 // Result types that can be returned by the agent
-export type ResultType = 'flights' | 'accommodations' | 'restaurants' | 'itinerary';
+export type ResultType = 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary';
 
 // Base result data interface
 export interface BaseResultData {
@@ -153,7 +163,101 @@ export interface RestaurantSearchResults extends BaseResultData {
   };
 }
 
-// Itinerary result data
+// Attraction result data (new)
+export interface AttractionResult {
+  name: string;
+  place_id: string;
+  formatted_address: string;
+  rating?: number;
+  user_ratings_total?: number;
+  price_level?: number; // 0-4
+  types: string[];
+  opening_hours?: Record<string, unknown>;
+  website?: string;
+  phone_number?: string;
+  photos?: Record<string, unknown>[];
+  geometry?: Record<string, unknown>;
+  visit_duration_estimate?: number; // minutes
+}
+
+export interface AttractionSearchResults extends BaseResultData {
+  type: 'attractions';
+  attractions: AttractionResult[];
+  total_results: number;
+  search_params?: {
+    location: string;
+    attraction_types?: string[];
+    max_results: number;
+  };
+}
+
+// Enhanced itinerary models matching backend
+export type ActivityType = 
+  | 'flight' 
+  | 'accommodation' 
+  | 'restaurant' 
+  | 'attraction' 
+  | 'transportation' 
+  | 'general';
+
+export interface TimeSlot {
+  start_time: string; // HH:MM format
+  end_time?: string;
+  duration_minutes?: number;
+}
+
+export interface TransportationActivity {
+  mode: string; // 'train' | 'bus' | 'taxi' | 'uber' | 'walking' | 'metro'
+  from_location: string;
+  to_location: string;
+  provider?: string;
+  cost_estimate?: number;
+  notes?: string;
+}
+
+export interface GeneralActivity {
+  title: string;
+  description?: string;
+  location?: string;
+  cost_estimate?: number;
+  notes?: string;
+}
+
+export interface ItineraryActivity {
+  time_slot: TimeSlot;
+  activity_type: ActivityType;
+  title: string;
+  activity_details: FlightResult | PropertyResult | RestaurantResult | AttractionResult | TransportationActivity | GeneralActivity;
+  notes?: string;
+}
+
+export interface DailyItinerary {
+  day_number: number;
+  date: string; // YYYY-MM-DD format
+  location: string;
+  daily_summary: string;
+  activities: ItineraryActivity[];
+  estimated_daily_cost?: number;
+  weather_info?: string;
+}
+
+export interface TravelItinerary {
+  trip_title: string;
+  destination: string;
+  start_date: string; // YYYY-MM-DD format
+  end_date: string;   // YYYY-MM-DD format
+  total_days: number;
+  traveler_count: number;
+  daily_itineraries: DailyItinerary[];
+  total_estimated_cost?: number;
+  trip_summary: string;
+  packing_suggestions?: string[];
+  travel_tips?: string[];
+  created_at: string;
+  last_updated: string;
+}
+
+// Legacy itinerary interface for backward compatibility
 export interface ItineraryItem {
   id: string;
   type: 'flight' | 'accommodation' | 'restaurant' | 'activity';
@@ -179,7 +283,8 @@ export interface ItineraryData extends BaseResultData {
 export type ResultData = 
   | FlightSearchResults 
   | AccommodationSearchResults 
-  | RestaurantSearchResults 
+  | RestaurantSearchResults
+  | AttractionSearchResults 
   | ItineraryData;
 
 // Chat session interface
