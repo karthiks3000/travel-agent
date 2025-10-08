@@ -134,8 +134,8 @@ def _combine_and_sort_results(airbnb_results: Dict[str, Any],
     """Combine and sort results from both platforms"""
     try:
         # Get properties from both platforms
-        airbnb_properties = airbnb_results.get("properties", []) if airbnb_results.get("success", False) else []
-        booking_properties = booking_results.get("properties", []) if booking_results.get("success", False) else []
+        airbnb_properties = airbnb_results.get("properties", []) if airbnb_results.get("search_successful", False) else []
+        booking_properties = booking_results.get("properties", []) if booking_results.get("search_successful", False) else []
         
         print(f"🔄 Combining results from Airbnb ({len(airbnb_properties)}) and Booking.com ({len(booking_properties)})")
         
@@ -231,14 +231,15 @@ def search_accommodations_direct(location: str, check_in: str, check_out: str,
         if platform_preference in ["booking", "both"]:
             booking_results = _search_booking_com(browser_wrapper, location, check_in, check_out, guests, rooms)
         
-        # Combine and sort results if both platforms were searched
-        if platform_preference == "both" and airbnb_results and booking_results:
+        # Combine and sort results, handling partial failures gracefully
+        if platform_preference == "both":
+            # Try to combine results from both platforms, even if one failed
             best_accommodations = _combine_and_sort_results(airbnb_results, booking_results)
-        elif platform_preference == "airbnb" and airbnb_results:
+        elif platform_preference == "airbnb":
             # Convert Airbnb properties to PropertyResult objects
             properties = airbnb_results.get("properties", [])
             best_accommodations = [PropertyResult(**prop) if isinstance(prop, dict) else prop for prop in properties[:10]]
-        elif platform_preference == "booking" and booking_results:
+        elif platform_preference == "booking":
             # Convert Booking.com properties to PropertyResult objects
             properties = booking_results.get("properties", [])
             best_accommodations = [PropertyResult(**prop) if isinstance(prop, dict) else prop for prop in properties[:10]]
@@ -255,7 +256,8 @@ def search_accommodations_direct(location: str, check_in: str, check_out: str,
                     "airbnb_count": len(airbnb_results.get("properties", [])) if airbnb_results else 0,
                     "booking_count": len(booking_results.get("properties", [])) if booking_results else 0
                 },
-                recommendation=f"Found {len(best_accommodations)} excellent accommodation options in {location}. These properties were selected based on the best combination of value, ratings, and availability for your {check_in} to {check_out} stay."
+                recommendation=f"Found {len(best_accommodations)} excellent accommodation options in {location}. These properties were selected based on the best combination of value, ratings, and availability for your {check_in} to {check_out} stay.",
+                validation_error=None
             )
             
             # Update progress to completed
@@ -269,8 +271,18 @@ def search_accommodations_direct(location: str, check_in: str, check_out: str,
                 overall_progress_message="Accommodation search completed successfully",
                 is_final_response=True,
                 tool_progress=[accommodation_progress],
-                accommodation_results=accommodation_results,
-                processing_time_seconds=processing_time
+                accommodation_results=best_accommodations,
+                processing_time_seconds=processing_time,
+                success=True,
+                error_message=None,
+                next_expected_input_friendly=None,
+                flight_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
         else:
             # No results found
@@ -286,7 +298,16 @@ def search_accommodations_direct(location: str, check_in: str, check_out: str,
                 tool_progress=[accommodation_progress],
                 success=False,
                 processing_time_seconds=processing_time,
-                error_message="No results found"
+                error_message="No results found",
+                next_expected_input_friendly=None,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
             )
             
     except Exception as e:
@@ -306,5 +327,14 @@ def search_accommodations_direct(location: str, check_in: str, check_out: str,
             tool_progress=[accommodation_progress],
             success=False,
             error_message=str(e),
-            processing_time_seconds=processing_time
+            processing_time_seconds=processing_time,
+            next_expected_input_friendly=None,
+            flight_results=None,
+            accommodation_results=None,
+            restaurant_results=None,
+            attraction_results=None,
+            itinerary=None,
+            estimated_costs=None,
+            recommendations=None,
+            session_metadata=None
         )

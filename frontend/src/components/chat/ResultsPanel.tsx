@@ -8,7 +8,8 @@ import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { useChatResults } from '@/stores/chatStore';
 import { BarChart3, Plane, Building, UtensilsCrossed, MapPin, AlertCircle } from 'lucide-react';
-import type { ResultData } from '@/types/chat';
+import type { ResultData, FlightSearchResults, AccommodationSearchResults } from '@/types/chat';
+import { FlightOptions, AccommodationOptions } from '@/components/travel/ComponentResults';
 
 interface ResultsPanelProps {
   className?: string;
@@ -163,79 +164,35 @@ const ResultsContent: React.FC<ResultsContentProps> = ({ results }) => {
   }
 };
 
-// Placeholder components for different result types
-const FlightResultsContent: React.FC<{ results: any }> = ({ results }) => (
-  <Card>
-    <CardContent className="p-4">
-      <div className="flex items-center space-x-2 mb-4">
-        <Plane className="w-5 h-5 text-blue-600" />
-        <h3 className="font-semibold">Flight Search Results</h3>
-      </div>
-      <p className="text-gray-600 mb-4">{results.recommendation}</p>
-      
-      {results.best_outbound_flight && (
-        <div className="space-y-3">
-          <h4 className="font-medium">Best Outbound Flight</h4>
-          <div className="bg-gray-50 p-3 rounded-lg">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div><strong>Airline:</strong> {results.best_outbound_flight.airline}</div>
-              <div><strong>Price:</strong> ${results.best_outbound_flight.price}</div>
-              <div><strong>Departure:</strong> {results.best_outbound_flight.departure_time}</div>
-              <div><strong>Arrival:</strong> {results.best_outbound_flight.arrival_time}</div>
-              <div><strong>Duration:</strong> {results.best_outbound_flight.duration}</div>
-              <div><strong>Stops:</strong> {results.best_outbound_flight.stops}</div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {results.best_return_flight && (
-        <div className="space-y-3 mt-4">
-          <h4 className="font-medium">Best Return Flight</h4>
-          <div className="bg-gray-50 p-3 rounded-lg">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div><strong>Airline:</strong> {results.best_return_flight.airline}</div>
-              <div><strong>Price:</strong> ${results.best_return_flight.price}</div>
-              <div><strong>Departure:</strong> {results.best_return_flight.departure_time}</div>
-              <div><strong>Arrival:</strong> {results.best_return_flight.arrival_time}</div>
-              <div><strong>Duration:</strong> {results.best_return_flight.duration}</div>
-              <div><strong>Stops:</strong> {results.best_return_flight.stops}</div>
-            </div>
-          </div>
-        </div>
-      )}
-    </CardContent>
-  </Card>
-);
+// Flight results component using FlightOptions
+const FlightResultsContent: React.FC<{ results: FlightSearchResults }> = ({ results }) => {
+  if (!results.flights || results.flights.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <p className="text-gray-600">No flight results available.</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
-const AccommodationResultsContent: React.FC<{ results: any }> = ({ results }) => (
-  <Card>
-    <CardContent className="p-4">
-      <div className="flex items-center space-x-2 mb-4">
-        <Building className="w-5 h-5 text-green-600" />
-        <h3 className="font-semibold">Accommodation Results</h3>
-      </div>
-      <p className="text-gray-600 mb-4">{results.recommendation}</p>
-      
-      {results.best_accommodations && results.best_accommodations.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="font-medium">Recommended Properties</h4>
-          {results.best_accommodations.slice(0, 3).map((property: any, index: number) => (
-            <div key={index} className="bg-gray-50 p-3 rounded-lg">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><strong>Title:</strong> {property.title || 'N/A'}</div>
-                <div><strong>Price:</strong> ${property.price_per_night || 'N/A'}/night</div>
-                <div><strong>Rating:</strong> {property.rating || 'N/A'}</div>
-                <div><strong>Platform:</strong> {property.platform}</div>
-                <div className="col-span-2"><strong>Location:</strong> {property.location || 'N/A'}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </CardContent>
-  </Card>
-);
+  return <FlightOptions flights={results.flights} showMultiple={true} />;
+};
+
+// Accommodation results component using AccommodationOptions
+const AccommodationResultsContent: React.FC<{ results: AccommodationSearchResults }> = ({ results }) => {
+  if (!results.best_accommodations || results.best_accommodations.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <p className="text-gray-600">No accommodation results available.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return <AccommodationOptions accommodations={results.best_accommodations} showMultiple={true} />;
+};
 
 const RestaurantResultsContent: React.FC<{ results: any }> = ({ results }) => (
   <Card>

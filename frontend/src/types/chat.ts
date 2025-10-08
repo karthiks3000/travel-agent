@@ -84,17 +84,8 @@ export interface FlightResult {
 
 export interface FlightSearchResults extends BaseResultData {
   type: 'flights';
-  best_outbound_flight?: FlightResult;
-  best_return_flight?: FlightResult;
-  all_flights?: FlightResult[];
-  search_params?: {
-    origin: string;
-    destination: string;
-    departure_date: string;
-    return_date?: string;
-    passengers: number;
-    cabin_class: string;
-  };
+  flights: FlightResult[];
+  search_metadata?: Record<string, unknown>;
 }
 
 // Accommodation result data (aligned with backend models)
@@ -370,9 +361,9 @@ export interface AgentCoreResponse {
   // Tool progress tracking
   tool_progress: ToolProgress[];
   
-  // Structured results from specialist agents
-  flight_results?: FlightSearchResults;
-  accommodation_results?: AccommodationSearchResults;
+  // Structured results from specialist agents (arrays of results)
+  flight_results?: FlightResult[];
+  accommodation_results?: PropertyResult[];
   restaurant_results?: RestaurantSearchResults;
   comprehensive_plan?: ItineraryData;
   

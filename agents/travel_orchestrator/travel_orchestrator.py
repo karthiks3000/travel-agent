@@ -115,7 +115,6 @@ class TravelOrchestratorAgent(Agent):
                 self.search_accommodations,
                 self.search_restaurants,
                 self.search_attractions,
-                self.create_comprehensive_itinerary
             ]
             + gateway_tools  # Add Google Maps tools from Gateway
         )
@@ -362,7 +361,6 @@ AVAILABLE TOOLS:
 - searchPlacesByText: Google Places text search for restaurants and attractions
 - searchNearbyPlaces: Google Places nearby search for locations around specific points
 - getPlaceDetails: Get detailed information about specific places
-- create_comprehensive_itinerary: Generate complete day-by-day travel plans
 
 REQUEST TYPE DETECTION - Listen carefully to what users want:
 
@@ -379,7 +377,7 @@ REQUEST TYPE DETECTION - Listen carefully to what users want:
    → response_type: "mixed_results"
 
 4. **COMPREHENSIVE PLANNING**: "plan my trip", "create itinerary", "7-day vacation plan"
-   → Use create_comprehensive_itinerary tool
+   → Call multiple tools and create the itinerary
    → response_type: "itinerary"
 
 INTELLIGENT GOOGLE PLACES API USAGE:
@@ -444,6 +442,7 @@ search_accommodations:
 - return_date: REQUIRED - Check-out date in YYYY-MM-DD format, after departure_date
 - passengers: OPTIONAL - Defaults to 2, must be 1-30 (number of guests)
 - rooms: OPTIONAL - Defaults to 1, must be 1-8
+- platform_preference: OPTIONAL - "airbnb", "booking", or "both". use booking when user specifies hotels or resorts. use airbnb when user is looking for rentals. use both when the user hasnt specified a preference for type of accomodation
 
 search_restaurants:
 - destination: REQUIRED - Must be a city name
@@ -456,12 +455,6 @@ search_attractions:
 - attraction_types: OPTIONAL - List of types (e.g., ["museum", "park"])
 - max_results: OPTIONAL - Defaults to 5, must be 1-10
 
-create_comprehensive_itinerary:
-- destination: REQUIRED - Destination city
-- origin: REQUIRED - Origin city
-- departure_date: REQUIRED - Trip start date in YYYY-MM-DD format
-- return_date: REQUIRED - Trip end date in YYYY-MM-DD format
-- traveler_count: OPTIONAL - Defaults to 2, must be 1-10
 
 TOOL CALLING RULES:
 1. **ONLY call tools when you have ALL required parameters with valid values**
@@ -543,8 +536,8 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
         Search for flights using direct browser automation tools
         
         Args:
-            origin: Origin airport code or city (e.g., 'JFK', 'New York')
-            destination: Destination airport code or city (e.g., 'LAX', 'Los Angeles') 
+            origin: Origin airport IATA code (e.g., 'JFK', 'BOM')
+            destination: Destination airport IATA code (e.g., 'LAX', 'HYD') 
             departure_date: Departure date in YYYY-MM-DD format
             return_date: Return date for round-trip (optional)
             passengers: Number of passengers (1-9)
@@ -576,8 +569,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 restaurant_results=None,
                 attraction_results=None,
                 itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
                 estimated_costs=None,
                 recommendations=None,
                 session_metadata=None
@@ -614,8 +605,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 restaurant_results=None,
                 attraction_results=None,
                 itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
                 estimated_costs=None,
                 recommendations=None,
                 session_metadata=None
@@ -662,8 +651,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 restaurant_results=None,
                 attraction_results=None,
                 itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
                 estimated_costs=None,
                 recommendations=None,
                 session_metadata=None
@@ -698,8 +685,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 restaurant_results=None,
                 attraction_results=None,
                 itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
                 estimated_costs=None,
                 recommendations=None,
                 session_metadata=None
@@ -743,8 +728,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 restaurant_results=None,
                 attraction_results=None,
                 itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
                 estimated_costs=None,
                 recommendations=None,
                 session_metadata=None
@@ -770,8 +753,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
             restaurant_results=None,
             attraction_results=None,
             itinerary=None,
-            legacy_flight_results=None,
-            legacy_accommodation_results=None,
             estimated_costs=None,
             recommendations=None,
             session_metadata=None
@@ -814,8 +795,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 restaurant_results=None,
                 attraction_results=None,
                 itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
                 estimated_costs=None,
                 recommendations=None,
                 session_metadata=None
@@ -841,144 +820,10 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
             restaurant_results=None,
             attraction_results=None,
             itinerary=None,
-            legacy_flight_results=None,
-            legacy_accommodation_results=None,
             estimated_costs=None,
             recommendations=None,
             session_metadata=None
         )
-
-    @tool
-    def create_comprehensive_itinerary(self, destination: str, origin: str, departure_date: str, 
-                                     return_date: str, traveler_count: int = 2) -> TravelOrchestratorResponse:
-        """
-        Create a comprehensive day-by-day travel itinerary with flights, accommodations, restaurants, and attractions
-        
-        Args:
-            destination: Destination city (e.g., 'Paris', 'Tokyo')
-            origin: Origin city (e.g., 'New York', 'Los Angeles')
-            departure_date: Trip start date in YYYY-MM-DD format
-            return_date: Trip end date in YYYY-MM-DD format
-            traveler_count: Number of travelers (1-10)
-        
-        Returns:
-            TravelOrchestratorResponse with complete itinerary
-        """
-        from datetime import datetime, date
-        
-        print(f"🗓️ Creating comprehensive itinerary: {origin} → {destination} | {departure_date} to {return_date} | {traveler_count} travelers")
-        
-        try:
-            # Parse dates
-            start_date = datetime.strptime(departure_date, "%Y-%m-%d").date()
-            end_date = datetime.strptime(return_date, "%Y-%m-%d").date()
-            
-            # Collect all trip components by calling individual search tools
-            trip_components = TripComponents()
-            
-            # Search for flights
-            print("🔍 Gathering flight options...")
-            flight_response = self.search_flights(
-                origin=origin, 
-                destination=destination, 
-                departure_date=departure_date, 
-                return_date=return_date, 
-                passengers=traveler_count
-            )
-            if flight_response.success and flight_response.flight_results:
-                # Convert legacy format to new format if needed
-                if hasattr(flight_response, 'legacy_flight_results') and flight_response.legacy_flight_results:
-                    # Extract flights from legacy format
-                    legacy_results = flight_response.legacy_flight_results
-                    if hasattr(legacy_results, 'best_outbound_flight') and legacy_results.best_outbound_flight:
-                        trip_components.flights.append(legacy_results.best_outbound_flight)
-                    if hasattr(legacy_results, 'best_return_flight') and legacy_results.best_return_flight:
-                        trip_components.flights.append(legacy_results.best_return_flight)
-                else:
-                    trip_components.flights = flight_response.flight_results or []
-            
-            # Search for accommodations
-            print("🔍 Gathering accommodation options...")
-            accommodation_response = self.search_accommodations(
-                destination=destination, 
-                departure_date=departure_date, 
-                return_date=return_date, 
-                passengers=traveler_count
-            )
-            if accommodation_response.success and accommodation_response.accommodation_results:
-                trip_components.accommodations = accommodation_response.accommodation_results or []
-            
-            # Search for restaurants (if MCP available)
-            print("🔍 Gathering restaurant recommendations...")
-            restaurant_response = self.search_restaurants(destination=destination, max_results=8)
-            if restaurant_response.success and restaurant_response.restaurant_results:
-                trip_components.restaurants = restaurant_response.restaurant_results or []
-            
-            # Search for attractions (if MCP available)
-            print("🔍 Gathering attraction recommendations...")
-            attraction_response = self.search_attractions(destination=destination, max_results=6)
-            if attraction_response.success and attraction_response.attraction_results:
-                trip_components.attractions = attraction_response.attraction_results or []
-            
-            # Generate comprehensive itinerary
-            print("📋 Generating day-by-day itinerary...")
-            return generate_comprehensive_itinerary(
-                destination=destination,
-                origin=origin,
-                start_date=start_date,
-                end_date=end_date,
-                traveler_count=traveler_count,
-                trip_components=trip_components
-            )
-            
-        except ValueError as e:
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.CONVERSATION,
-                response_status=ResponseStatus.VALIDATION_ERROR,
-                message=f"Invalid date format. Please use YYYY-MM-DD format for dates.",
-                overall_progress_message="Date validation failed",
-                is_final_response=True,
-                success=False,
-                error_message=f"Date parsing error: {str(e)}",
-                processing_time_seconds=0,
-                next_expected_input_friendly=None,
-                flight_results=None,
-                accommodation_results=None,
-                restaurant_results=None,
-                attraction_results=None,
-                itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
-                estimated_costs=None,
-                recommendations=None,
-                session_metadata=None
-            )
-        
-        except Exception as e:
-            print(f"❌ Comprehensive itinerary generation failed: {str(e)}")
-            
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.CONVERSATION,
-                response_status=ResponseStatus.SYSTEM_ERROR,
-                message="I encountered an error while creating your comprehensive itinerary. Please try again.",
-                overall_progress_message="Itinerary generation failed",
-                is_final_response=True,
-                success=False,
-                error_message=str(e),
-                processing_time_seconds=0,
-                next_expected_input_friendly=None,
-                flight_results=None,
-                accommodation_results=None,
-                restaurant_results=None,
-                attraction_results=None,
-                itinerary=None,
-                legacy_flight_results=None,
-                legacy_accommodation_results=None,
-                estimated_costs=None,
-                recommendations=None,
-                session_metadata=None
-            )
-
 
 # Bedrock AgentCore integration
 app = BedrockAgentCoreApp()
@@ -1141,6 +986,7 @@ def travel_orchestrator_invocation(payload, context=None):
         actor_id = "travel-orchestrator"
         
         logger.info(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
+        print(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
         
         # Initialize memory (optional - agent works without it)
         memory_id = initialize_memory(region=region)

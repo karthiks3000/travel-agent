@@ -121,16 +121,6 @@ class TravelOrchestratorResponse(BaseModel):
         description="Complete day-by-day travel itinerary when response_type is 'itinerary'"
     )
     
-    # Legacy support for existing integrations
-    legacy_flight_results: Optional[FlightSearchResults] = Field(
-        None, 
-        description="Legacy flight results format (deprecated - use flight_results)"
-    )
-    legacy_accommodation_results: Optional[AccommodationAgentResponse] = Field(
-        None, 
-        description="Legacy accommodation results format (deprecated - use accommodation_results)"
-    )
-    
     # Additional response metadata
     processing_time_seconds: Optional[float] = Field(
         None, 

@@ -109,16 +109,16 @@ export const useChatStore = create<ChatStore>()(
         let resultData: ResultData | null = null;
         const displayMessage = response.message || "No response";
 
-        // Handle complete_success responses with results
-        if (response.response_status === "complete_success" && response.response_type) {
+        // Handle responses with results (check for success and response_type)
+        if (response.success && response.response_type) {
           // Map response_type to resultType and extract appropriate data
           switch (response.response_type) {
             case "flights":
               resultType = "flights";
               if (response.flight_results) {
                 resultData = {
-                  ...response.flight_results,
                   type: "flights" as const,
+                  flights: response.flight_results,
                   timestamp: new Date()
                 };
               }
@@ -127,8 +127,8 @@ export const useChatStore = create<ChatStore>()(
               resultType = "accommodations";
               if (response.accommodation_results) {
                 resultData = {
-                  ...response.accommodation_results,
                   type: "accommodations" as const,
+                  best_accommodations: response.accommodation_results,
                   timestamp: new Date()
                 };
               }
