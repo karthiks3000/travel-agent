@@ -19,10 +19,3 @@ class FlightResult(BaseModel):
     stop_details: Optional[str] = Field(None, description="Stop airport details if applicable")
     booking_class: str = Field(default="Economy", description="Booking class")
     
-class FlightSearchResults(BaseModel):
-    """Complete flight search results with best flight selections"""
-    best_outbound_flight: Optional[FlightResult] = Field(None, description="Best selected outbound flight based on cost and convenience")
-    best_return_flight: Optional[FlightResult] = Field(None, description="Best selected return flight (if round-trip)")
-    search_metadata: dict = Field(default_factory=dict, description="Additional search metadata")
-    recommendation: str = Field(..., description="Agent's personalized flight recommendations and booking advice")
-    validation_error: Optional[ValidationError] = Field(None, description="Validation error details if applicable")

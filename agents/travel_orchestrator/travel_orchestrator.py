@@ -467,14 +467,20 @@ AttractionResult format:
   "visit_duration_estimate": 120
 }}
 
-PARAMETER REQUIREMENTS:
+FLIGHT SEARCH TOOL PARAMETERS:
 
-search_flights:
-- origin: REQUIRED - Must be a city name or airport code
-- destination: REQUIRED - Must be a city name or airport code
-- departure_date: REQUIRED - Must be in YYYY-MM-DD format
-- return_date: OPTIONAL - Must be in YYYY-MM-DD format, after departure_date
-- passengers: OPTIONAL - Defaults to 1, must be 1-9
+search_flights accepts comprehensive filtering parameters:
+- origin: REQUIRED - Origin airport code (e.g., 'JFK', 'LAX')
+- destination: REQUIRED - Destination airport code (e.g., 'CDG', 'LHR')
+- departure_date: REQUIRED - YYYY-MM-DD format
+- return_date: OPTIONAL - YYYY-MM-DD format for round-trip
+- adults: OPTIONAL - Adult travelers (age 12+), default 1, max 9 total passengers
+- children: OPTIONAL - Child travelers (age 2-11), default 0
+- infants: OPTIONAL - Infant travelers (under 2), default 0, max = adults count
+- travel_class: OPTIONAL - "ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"
+- non_stop: OPTIONAL - true for direct flights only, default false
+- max_price: OPTIONAL - Maximum price per traveler in USD
+- max_results: OPTIONAL - Max offers to return, default 50
 
 search_accommodations:
 - destination: REQUIRED - Must be a city name
@@ -580,39 +586,81 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
 
 
     @tool
-    def search_flights(self, origin: str, destination: str, departure_date: str, 
-                      return_date: Optional[str] = None, passengers: int = 1) -> TravelOrchestratorResponse:
+    def search_flights(
+        self, 
+        origin: str, 
+        destination: str, 
+        departure_date: str,
+        return_date: Optional[str] = None,
+        adults: int = 1,
+        children: int = 0,
+        infants: int = 0,
+        travel_class: Optional[str] = None,
+        non_stop: bool = False,
+        max_price: Optional[int] = None,
+        max_results: int = 50
+    ) -> TravelOrchestratorResponse:
         """
-        Search for flights using direct browser automation tools
+        Search for flights using Amadeus API with comprehensive filtering options
         
         Args:
-            origin: Origin airport IATA code (e.g., 'JFK', 'BOM')
-            destination: Destination airport IATA code (e.g., 'LAX', 'HYD') 
+            origin: Origin airport IATA code (e.g., 'JFK', 'LAX')
+            destination: Destination airport IATA code (e.g., 'CDG', 'LHR')
             departure_date: Departure date in YYYY-MM-DD format
-            return_date: Return date for round-trip (optional)
-            passengers: Number of passengers (1-9)
+            return_date: Return date for round-trip (optional, YYYY-MM-DD format)
+            adults: Number of adult travelers (age 12+), default 1, max 9
+            children: Number of child travelers (age 2-11), default 0
+            infants: Number of infant travelers (under 2), default 0
+            travel_class: Cabin class - "ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"
+            non_stop: If True, only return direct flights with no stops
+            max_price: Maximum price per traveler in USD (filters expensive options)
+            max_results: Maximum number of flight offers to return (default 50)
         
         Returns:
-            TravelOrchestratorResponse with structured flight results and progress tracking
+            TravelOrchestratorResponse with all matching flight results
         """
-        # Validate parameters using dedicated validation method
-        validation_errors = self._validate_flight_params(origin, destination, departure_date, return_date, passengers)
-        
-        # Return validation error if parameters are invalid
-        if validation_errors:
+        # Validate total passenger count
+        total_passengers = adults + children + infants
+        if total_passengers < 1 or total_passengers > 9:
             validation_progress = create_tool_progress("search_flights", {"origin": origin, "destination": destination}, "failed")
-            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
+            validation_progress.error_message = f"Total passengers must be between 1-9 (got {total_passengers})"
             
             return TravelOrchestratorResponse(
                 response_type=ResponseType.CONVERSATION,
                 response_status=ResponseStatus.VALIDATION_ERROR,
-                message=f"I need more information to search for flights. Missing: {', '.join(validation_errors)}",
-                overall_progress_message="Flight search needs more details",
+                message=f"Total passengers (adults + children + infants) must be between 1-9. You specified {total_passengers} total passengers.",
+                overall_progress_message="Flight search needs valid passenger count",
                 is_final_response=False,
-                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
+                next_expected_input_friendly="Please provide valid passenger counts",
                 tool_progress=[validation_progress],
                 success=False,
-                error_message=f"Missing parameters: {', '.join(validation_errors)}",
+                error_message=f"Invalid passenger count: {total_passengers}",
+                processing_time_seconds=0,
+                flight_results=None,
+                accommodation_results=None,
+                restaurant_results=None,
+                attraction_results=None,
+                itinerary=None,
+                estimated_costs=None,
+                recommendations=None,
+                session_metadata=None
+            )
+        
+        # Validate infants don't exceed adults
+        if infants > adults:
+            validation_progress = create_tool_progress("search_flights", {"origin": origin, "destination": destination}, "failed")
+            validation_progress.error_message = f"Infants ({infants}) cannot exceed adults ({adults})"
+            
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.VALIDATION_ERROR,
+                message=f"Number of infants ({infants}) cannot exceed number of adults ({adults}). Each infant must be accompanied by an adult.",
+                overall_progress_message="Flight search needs valid passenger distribution",
+                is_final_response=False,
+                next_expected_input_friendly="Please adjust passenger counts",
+                tool_progress=[validation_progress],
+                success=False,
+                error_message=f"Infants exceed adults: {infants} > {adults}",
                 processing_time_seconds=0,
                 flight_results=None,
                 accommodation_results=None,
@@ -626,11 +674,23 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
         
         print(f"✈️  Direct flight search: {origin} → {destination} on {departure_date}")
         if return_date:
-            print(f"   Return: {return_date} | Passengers: {passengers}")
+            print(f"   Return: {return_date} | Passengers: {total_passengers} (Adults: {adults}, Children: {children}, Infants: {infants})")
         
         try:
-            # Call the direct flight search tool
-            return search_flights_direct(origin, destination, departure_date, return_date, passengers)
+            # Call the direct flight search tool with all new parameters
+            return search_flights_direct(
+                origin=origin,
+                destination=destination, 
+                departure_date=departure_date,
+                return_date=return_date,
+                adults=adults,
+                children=children,
+                infants=infants,
+                travel_class=travel_class,
+                non_stop=non_stop,
+                max_price=max_price,
+                max_results=max_results
+            )
             
         except Exception as e:
             print(f"❌ Direct flight search failed: {str(e)}")

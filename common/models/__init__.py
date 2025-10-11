@@ -25,8 +25,7 @@ from .travel_models import (
 
 # Specialist agent response models
 from .flight_models import (
-    FlightResult,
-    FlightSearchResults
+    FlightResult
 )
 
 from .accommodation_models import (
@@ -68,7 +67,6 @@ __all__ = [
     
     # Flight models
     'FlightResult',
-    'FlightSearchResults',
     
     # Accommodation models
     'PropertyResult',

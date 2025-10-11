@@ -7,7 +7,7 @@ from enum import Enum
 from datetime import datetime
 
 # Import specialist agent response models using relative imports within common
-from .flight_models import FlightSearchResults, FlightResult
+from .flight_models import FlightResult
 from .accommodation_models import AccommodationAgentResponse, PropertyResult
 from .food_models import RestaurantSearchResults, RestaurantResult
 from .travel_models import ComprehensiveTravelPlan
@@ -218,26 +218,6 @@ TOOL_DISPLAY_MAPPING = {
 class AgentResponseParser:
     """Helper class to parse specialist agent responses into proper Pydantic models"""
     
-    @staticmethod
-    def parse_flight_response(raw_response: Dict[str, Any]) -> Optional[FlightSearchResults]:
-        """Parse flight agent response into FlightSearchResults model"""
-        try:
-            # Handle both direct structured responses and text responses
-            if isinstance(raw_response, dict):
-                # Check if it's already structured flight data
-                if 'best_outbound_flight' in raw_response or 'recommendation' in raw_response:
-                    return FlightSearchResults.model_validate(raw_response)
-                
-                # Handle text responses wrapped in agent format
-                if 'response_text' in raw_response:
-                    # For now, return None - the text response will be handled by the orchestrator
-                    return None
-            
-            return None
-            
-        except Exception as e:
-            print(f"⚠️  Failed to parse flight response: {e}")
-            return None
     
     @staticmethod
     def parse_accommodation_response(raw_response: Dict[str, Any]) -> Optional[AccommodationAgentResponse]:
