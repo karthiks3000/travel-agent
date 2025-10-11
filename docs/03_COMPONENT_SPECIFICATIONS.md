@@ -298,273 +298,252 @@ const InteractiveItinerary: React.FC<{
 
 ## Backend Components
 
-### 1. Multi-Agent System Implementation
+### 1. Single Agent Implementation
 
-**Location**: `agent/` (5 separate AgentCore Runtime instances)
+**Location**: `agents/travel_orchestrator/`
 
-**1. Travel Orchestrator Agent** - `orchestrator_agent.py`
+**Travel Orchestrator Agent** - `travel_orchestrator.py`
 ```python
 from strands import Agent, tool
 from bedrock_agentcore import BedrockAgentCoreApp
-import asyncio
-import httpx
-from typing import Dict, List, Optional
+from bedrock_agentcore.memory import MemoryClient
+from strands.models.bedrock import BedrockModel
+from typing import Optional
 
 app = BedrockAgentCoreApp()
 
 class TravelOrchestratorAgent(Agent):
-    """Main orchestrator agent that coordinates specialist agents"""
+    """Single agent that handles all travel planning through integrated tools"""
     
-    def __init__(self, user_id: str):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0",
-            memory=AgentCoreMemory(user_id=user_id)  # Only main agent has memory
+    def __init__(self, memory_id: Optional[str] = None, session_id: Optional[str] = None, 
+                 actor_id: Optional[str] = None, region: str = "us-east-1"):
+        # Configure Nova Premier model for enhanced reasoning
+        model = BedrockModel(
+            model_id="us.amazon.nova-premier-v1:0",
+            max_tokens=10000,
+            temperature=0.7,
+            top_p=0.9
         )
-        self.user_id = user_id
-        self.specialist_agents = {
-            "flights": os.getenv("FLIGHT_AGENT_ARN"),
-            "airbnb": os.getenv("AIRBNB_AGENT_ARN"),
-            "booking": os.getenv("BOOKING_AGENT_ARN"),
-            "food": os.getenv("FOOD_AGENT_ARN")
-        }
+        
+        # Initialize memory if enabled
+        memory_hooks = None
+        if memory_id:
+            try:
+                memory_client = MemoryClient(region_name=region)
+                memory_hooks = TravelMemoryHook(memory_client, memory_id)
+            except Exception as e:
+                logger.error(f"Failed to initialize memory: {e}")
+                memory_hooks = None
+        
+        # Initialize Gateway tools via MCP client
+        gateway_tools = self._initialize_gateway_tools(region)
+        
+        # Combine direct tools with Gateway tools
+        all_tools = (
+            [
+                self.search_flights,        # Amadeus API integration
+                self.search_accommodations, # Nova Act browser automation
+            ]
+            + gateway_tools  # Add Google Maps tools from Gateway
+        )
+        
+        super().__init__(
+            model=model,
+            tools=all_tools,
+            system_prompt=self._build_system_prompt(),
+            hooks=[memory_hooks] if memory_hooks else [],
+            state={
+                "actor_id": actor_id,
+                "session_id": session_id,
+                "agent_type": "travel_orchestrator"
+            }
+        )
     
     @tool
-    async def plan_comprehensive_trip(self, destination: str, dates: dict,
-                                    travelers: int = 2, budget: float = None,
-                                    preferences: List[str] = None) -> Dict:
-        """Orchestrate parallel travel search across specialist agents"""
+    def search_flights(self, origin: str, destination: str, departure_date: str, 
+                      return_date: Optional[str] = None, passengers: int = 1) -> TravelOrchestratorResponse:
+        """Search flights using Amadeus Flight Offers Search API"""
+        validation_errors = self._validate_flight_params(origin, destination, departure_date, return_date, passengers)
         
-        # Get user preferences from memory
-        user_profile = self.memory.get_user_profile(self.user_id)
+        if validation_errors:
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.VALIDATION_ERROR,
+                message=f"Missing required parameters: {', '.join(validation_errors)}",
+                success=False,
+                error_message=f"Missing parameters: {', '.join(validation_errors)}"
+            )
         
-        # Prepare standardized search parameters
-        search_params = {
-            "destination": destination,
-            "check_in": dates["start"],
-            "check_out": dates["end"], 
-            "travelers": travelers,
-            "budget": budget,
-            "user_preferences": user_profile.preferences if user_profile else {}
-        }
+        return search_flights_direct(origin, destination, departure_date, return_date, passengers)
+    
+    @tool  
+    def search_accommodations(self, destination: str, departure_date: str, return_date: str,
+                            passengers: int = 2, rooms: int = 1, platform_preference: str = "both") -> TravelOrchestratorResponse:
+        """Search accommodations using Nova Act browser automation"""
+        validation_errors = self._validate_accommodation_params(destination, departure_date, return_date, passengers, rooms)
         
-        # Execute all searches in parallel
-        search_tasks = [
-            self._invoke_flight_agent(search_params),
-            self._invoke_airbnb_agent(search_params),
-            self._invoke_booking_agent(search_params),
-            self._invoke_food_agent(search_params)
-        ]
+        if validation_errors:
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.VALIDATION_ERROR,
+                message=f"Missing required parameters: {', '.join(validation_errors)}",
+                success=False,
+                error_message=f"Missing parameters: {', '.join(validation_errors)}"
+            )
         
-        # Wait for all specialist agents to complete (with timeout)
+        return search_accommodations_direct(destination, departure_date, return_date, passengers, rooms, platform_preference)
+    
+    def _initialize_gateway_tools(self, region: str = "us-east-1") -> List:
+        """Initialize Gateway tools via MCP client for Google Maps integration"""
         try:
-            results = await asyncio.gather(*search_tasks, timeout=60.0)
-        except asyncio.TimeoutError:
-            # Handle partial results if some agents timeout
-            results = await self._handle_partial_results(search_tasks)
-        
-        # Synthesize results from all specialist agents
-        synthesized_results = self._synthesize_multi_agent_results(
-            results, search_params, user_profile
-        )
-        
-        # Update user memory with new search
-        self._update_user_memory(search_params, synthesized_results)
-        
-        return synthesized_results
-    
-    async def _invoke_flight_agent(self, params: dict) -> dict:
-        """Invoke Flight Specialist Agent"""
-        return await self._call_specialist_agent("flights", {
-            "origin": params.get("origin", "JFK"),  # Default from user profile
-            "destination": params["destination"],
-            "departure_date": params["check_in"],
-            "return_date": params.get("check_out"),
-            "travelers": params["travelers"]
-        })
-    
-    async def _invoke_airbnb_agent(self, params: dict) -> dict:
-        """Invoke Airbnb Specialist Agent"""
-        return await self._call_specialist_agent("airbnb", {
-            "location": params["destination"],
-            "check_in": params["check_in"],
-            "check_out": params["check_out"],
-            "guests": params["travelers"],
-            "budget": params.get("budget")
-        })
-    
-    async def _invoke_booking_agent(self, params: dict) -> dict:
-        """Invoke Booking.com Specialist Agent"""
-        return await self._call_specialist_agent("booking", {
-            "location": params["destination"],
-            "check_in": params["check_in"],
-            "check_out": params["check_out"],
-            "guests": params["travelers"],
-            "budget": params.get("budget")
-        })
-    
-    async def _invoke_food_agent(self, params: dict) -> dict:
-        """Invoke Food Specialist Agent"""
-        return await self._call_specialist_agent("food", {
-            "location": params["destination"],
-            "dietary_restrictions": params.get("user_preferences", {}).get("dietary_restrictions", []),
-            "budget": params.get("budget")
-        })
-    
-    async def _call_specialist_agent(self, agent_type: str, search_params: dict) -> dict:
-        """Generic method to invoke any specialist agent"""
-        agent_arn = self.specialist_agents[agent_type]
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/{agent_arn}/invocations",
-                    headers={
-                        "Authorization": f"Bearer {self._get_workload_access_token()}",
-                        "Content-Type": "application/json",
-                        "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": f"search-{agent_type}-{uuid.uuid4()}"
-                    },
-                    json={
-                        "prompt": f"Search {agent_type} with the provided parameters",
-                        "search_params": search_params
-                    },
-                    timeout=45.0
-                )
+            # Get Gateway configuration from Parameter Store
+            gateway_url = get_parameter('/travel-agent/gateway-url')
+            gateway_client_id = get_parameter('/travel-agent/gateway-client-id')
+            gateway_client_secret = get_parameter('/travel-agent/gateway-client-secret')
+            
+            if not all([gateway_url, gateway_client_id, gateway_client_secret]):
+                logger.warning("Gateway configuration not found - Google Maps tools disabled")
+                return []
+            
+            # Initialize MCP client and start session
+            self.mcp_client = MCPClient(create_gateway_transport)
+            self.mcp_client.start()
+            
+            gateway_tools = self.mcp_client.list_tools_sync()
+            logger.info(f"Discovered {len(gateway_tools)} Google Maps tools from Gateway")
+            
+            return gateway_tools
                 
-                return {
-                    "agent": agent_type,
-                    "success": True,
-                    "data": response.json(),
-                    "latency": response.elapsed.total_seconds()
-                }
-            except Exception as e:
-                return {
-                    "agent": agent_type,
-                    "success": False,
-                    "error": str(e),
-                    "data": None
-                }
+        except Exception as e:
+            logger.warning(f"Gateway tool discovery failed: {e}")
+            return []
 
 @app.entrypoint
-async def orchestrator_invocation(payload):
-    """Main entry point for travel planning"""
-    user_id = payload.get("user_id", "anonymous")
-    travel_request = payload.get("prompt")
+def travel_orchestrator_invocation(payload, context=None):
+    """Non-streaming JSON response entry point"""
+    if "prompt" not in payload:
+        return {"error": "Missing 'prompt' in payload"}
     
-    orchestrator = TravelOrchestratorAgent(user_id=user_id)
-    
-    # Stream coordinated responses from all agents
-    stream = orchestrator.stream_async(travel_request)
-    async for event in stream:
-        yield event
+    try:
+        # Extract session ID from AgentCore context
+        session_id = context.session_id if context and hasattr(context, 'session_id') else generate_session_ids()
+        actor_id = "travel-orchestrator"
+        
+        # Initialize memory (optional)
+        memory_id = initialize_memory()
+        
+        # Create agent instance
+        agent = TravelOrchestratorAgent(
+            memory_id=memory_id,
+            session_id=session_id,
+            actor_id=actor_id
+        )
+        
+        # Get complete response from agent (non-streaming)
+        result = agent(payload["prompt"])
+        
+        # Parse and return JSON response
+        return parse_agent_response(result)
+            
+    except Exception as e:
+        logger.error(f"Error in travel orchestrator: {str(e)}")
+        return {
+            "error": f"Travel orchestrator failed: {str(e)}",
+            "response_type": "conversation",
+            "response_status": "tool_error",
+            "message": "I encountered an internal error. Please try again.",
+            "success": False
+        }
 
 if __name__ == "__main__":
     app.run()
 ```
 
-**2. Flight Specialist Agent** - `flight_agent.py`
+**Integrated Tool Implementations** - `tools/`
+
+**Flight Search Tool** - `tools/flight_search_tool.py`
 ```python
-from strands import Agent, tool
-from bedrock_agentcore import BedrockAgentCoreApp
-from nova_act import NovaAct
-from pydantic import BaseModel
-from typing import List
+from amadeus import Client
+from datetime import datetime
+from typing import Optional
 
-app = BedrockAgentCoreApp()
-
-class FlightListing(BaseModel):
-    airline: str
-    departure_time: str
-    arrival_time: str
-    duration: str
-    price: float
-    stops: int
-    booking_url: str = None
-
-class FlightSpecialistAgent(Agent):
-    """Specialized agent for flight search using Nova Act browser automation"""
+def search_flights_direct(origin: str, destination: str, departure_date: str, 
+                         return_date: Optional[str] = None, passengers: int = 1) -> TravelOrchestratorResponse:
+    """Search flights using Amadeus Flight Offers Search API"""
     
-    def __init__(self):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0"  # More capable model for browser tasks
+    start_time = datetime.now()
+    print(f"✈️  Amadeus flight search: {origin} → {destination} on {departure_date}")
+    
+    try:
+        # Initialize Amadeus client
+        amadeus = Client(
+            client_id=os.getenv('AMADEUS_CLIENT_ID'),
+            client_secret=os.getenv('AMADEUS_CLIENT_SECRET'),
+            hostname=os.getenv('AMADEUS_HOSTNAME', 'test')
         )
-    
-    @tool
-    def search_flights(self, origin: str, destination: str, departure_date: str,
-                      return_date: str = None, travelers: int = 1) -> dict:
-        """Search flights using Nova Act browser automation on Google Flights"""
         
-        try:
-            with NovaAct(
-                starting_page="https://www.google.com/travel/flights",
-                headless=True,
-                user_agent="TravelAgent/1.0 (NovaAct)"
-            ) as nova:
-                
-                # Navigate and set up search
-                nova.act(f"Search for flights from {origin} to {destination}")
-                nova.act(f"Set departure date to {departure_date}")
-                if return_date:
-                    nova.act(f"Set return date to {return_date}")
-                nova.act(f"Set number of passengers to {travelers}")
-                
-                # Extract structured flight data
-                result = nova.act(
-                    """Extract flight options with:
-                    - Airline name
-                    - Departure time
-                    - Arrival time
-                    - Flight duration
-                    - Price (as number)
-                    - Number of stops
-                    - Booking URL if available
-                    
-                    Return data for the first 20 flight options.""",
-                    schema=FlightSearchResults.model_json_schema()
-                )
-                
-                if result.matches_schema:
-                    flights = FlightSearchResults.model_validate(result.parsed_response)
-                    return {
-                        "success": True,
-                        "platform": "google_flights",
-                        "flights": flights.listings,
-                        "metadata": {
-                            "search_method": "nova_act_browser",
-                            "source": "Google Flights",
-                            "results_count": len(flights.listings)
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": "Failed to parse Google Flights results",
-                        "platform": "google_flights"
-                    }
-                    
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Flight search failed: {str(e)}",
-                "platform": "google_flights"
-            }
-
-@app.entrypoint
-async def flight_agent_invocation(payload):
-    """Entry point for flight searches"""
-    agent = FlightSpecialistAgent()
-    search_params = payload.get("search_params", {})
-    
-    # Process flight search request
-    stream = agent.stream_async(f"""
-    Search for flights with these parameters: {search_params}
-    Use the search_flights tool to get real-time flight data.
-    """)
-    
-    async for event in stream:
-        yield event
-
-if __name__ == "__main__":
-    app.run()
+        # Prepare search parameters
+        search_params = {
+            'originLocationCode': origin.upper(),
+            'destinationLocationCode': destination.upper(),
+            'departureDate': departure_date,
+            'adults': passengers,
+            'max': 50,
+            'currencyCode': 'USD'
+        }
+        
+        if return_date:
+            search_params['returnDate'] = return_date
+        
+        # Make API call
+        response = amadeus.shopping.flight_offers_search.get(**search_params)
+        flight_offers = response.data
+        
+        if not flight_offers:
+            return TravelOrchestratorResponse(
+                response_type=ResponseType.CONVERSATION,
+                response_status=ResponseStatus.TOOL_ERROR,
+                message=f"No flights found from {origin} to {destination} on {departure_date}",
+                success=False,
+                error_message="No flights found"
+            )
+        
+        # Select best flights using scoring algorithm
+        best_outbound_flight, outbound_score = _select_best_flight(flight_offers, "outbound")
+        best_return_flight = None
+        
+        if return_date:
+            return_result = _select_best_flight(flight_offers, "return")
+            if return_result:
+                best_return_flight, return_score = return_result
+        
+        # Create flight list
+        flight_list = [best_outbound_flight]
+        if best_return_flight:
+            flight_list.append(best_return_flight)
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        return TravelOrchestratorResponse(
+            response_type=ResponseType.FLIGHTS,
+            response_status=ResponseStatus.COMPLETE_SUCCESS,
+            message=_generate_recommendation(best_outbound_flight, best_return_flight, origin, destination, return_date is not None),
+            flight_results=flight_list,
+            processing_time_seconds=processing_time,
+            success=True
+        )
+        
+    except Exception as e:
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        return TravelOrchestratorResponse(
+            response_type=ResponseType.CONVERSATION,
+            response_status=ResponseStatus.TOOL_ERROR,
+            message="I encountered an error while searching for flights. Please try again.",
+            success=False,
+            error_message=str(e),
+            processing_time_seconds=processing_time
+        )
 ```
 
 **3. Airbnb Specialist Agent** - `airbnb_agent.py`
@@ -884,12 +863,14 @@ if __name__ == "__main__":
     app.run()
 ```
 
-**Multi-Agent Architecture Benefits**:
-- **True Parallel Execution**: All 4 searches run simultaneously in separate AgentCore Runtimes
-- **Independent Resource Allocation**: Browser agents get more memory, API agents are optimized for speed
-- **Fault Tolerance**: Individual agent failures don't crash entire search
-- **Specialized Models**: Use cheaper models for simple API calls, powerful models for complex browser tasks
-- **Independent Monitoring**: Each agent has its own observability and performance metrics
+**Single-Agent Implementation Benefits**:
+- **Simplified Architecture**: No inter-agent communication complexity
+- **Better Error Handling**: Single point of failure management
+- **Faster Response Times**: No network overhead between agents
+- **Easier Debugging**: Single execution context
+- **Resource Efficiency**: Shared memory and processing
+- **Consistent State**: Single agent maintains conversation context
+- **Cost Effectiveness**: Single runtime instance reduces overhead
 
 ### 2. Search Tool Implementations
 

@@ -1,8 +1,0 @@
-# Accommodation Agent Dependencies
-bedrock-agentcore
-strands-agents
-boto3
-requests
-pydantic
-nova-act
-aws-opentelemetry-distro>=0.10.0

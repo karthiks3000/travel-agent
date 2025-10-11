@@ -2,51 +2,50 @@
 
 ## System Architecture Overview
 
-The AI Travel Agent uses a simplified, direct architecture leveraging AgentCore Runtime's native capabilities for intelligent travel planning.
+The AI Travel Agent uses a **single orchestrator agent** architecture built on AWS Bedrock AgentCore Runtime with integrated tools for comprehensive travel planning.
 
 ```
 ┌─────────────────────────────────────────┐
 │           Frontend                      │
-│      React + TypeScript                 │
+│      React 18 + TypeScript              │
 │      TailwindCSS + Aceternity UI        │
 │                                         │
 │   ┌─────────────────────────────────┐   │
-│   │    HTTP Streaming Connection    │   │◄─────────┐
-│   │    (Real-time Updates)          │   │          │
+│   │    Direct HTTP Connection to    │   │◄─────────┐
+│   │    AgentCore Runtime            │   │          │
 │   └─────────────────────────────────────┘   │          │
 └─────────────────────────────────────────┘          │
                      │                                 │
                      ▼                                 │
 ┌─────────────────────────────────────────────────────┐│
 │      Travel Orchestrator Agent                     ││
-│         (Main AgentCore Runtime)                    ││
+│         (Single AgentCore Runtime)                 ││
 │  ┌─────────────────┐  ┌─────────────────────────┐  ││
 │  │   Cognito JWT   │  │   Orchestration Logic   │  ││
 │  │  Authentication │◄─┤   + Memory Integration  │  ││
 │  │                 │  │   + Result Synthesis    │  ││
 │  └─────────────────┘  └─────────────────────────┘  ││
 └─────────────────────────────────────────────────────┘│
-                     │ (Parallel Agent Calls)          │
+                     │ (Integrated Tools)               │
                      ▼                                 │
-┌─────────────┬─────────────┬─────────────┬───────────┐│
-│ Flight      │ Airbnb      │ Booking.com │ Food      ││
-│ Agent       │ Agent       │ Agent       │ Agent     ││
-│(AgentCore)  │(AgentCore)  │(AgentCore)  │(AgentCore)││
-│             │             │             │           ││
-│┌───────────┐│┌───────────┐│┌───────────┐│┌─────────┐││
-││ Nova Act  │││ Nova Act  │││ Nova Act  │││ Yelp    │││
-││ Browser   │││ Browser   │││ Browser   │││ Fusion  │││
-││(G.Flights)│││(Airbnb)   │││(Booking)  │││ API     │││
-│└───────────┘│└───────────┘│└───────────┘│└─────────┘││
-└─────────────┴─────────────┴─────────────┴───────────┘│
+┌─────────────┬─────────────┬─────────────────────────┐│
+│ Amadeus     │ Nova Act    │ Google Maps             ││
+│ Flight API  │ Browser     │ API Gateway             ││
+│             │ Automation  │                         ││
+│ ┌─────────┐ │ ┌─────────┐ │ ┌─────────────────────┐ ││
+│ │Real-time│ │ │ Airbnb  │ │ │   Restaurants &     │ ││
+│ │Flight   │ │ │Booking  │ │ │   Attractions       │ ││
+│ │Pricing  │ │ │Search   │ │ │   via MCP Client    │ ││
+│ └─────────┘ │ └─────────┘ │ └─────────────────────┘ ││
+└─────────────┴─────────────┴─────────────────────────┘│
                                                       │
 ┌─────────────────────────────────────────────────────┘
 │         Built-in Observability & Monitoring  
 │  ┌──────────────────────────────────────────────┐
-│  │  • AgentCore Observability (All Agents)     │
-│  │  • Cross-Agent Trace Correlation            │
-│  │  • Individual Agent Performance Metrics     │
-│  │  • Built-in Rate Limiting (100 RPS each)    │
+│  │  • AgentCore Runtime Observability          │
+│  │  • Tool Execution Monitoring                │
+│  │  • Memory Usage & Performance Metrics       │
+│  │  • Built-in Rate Limiting & Error Handling  │
 │  └──────────────────────────────────────────────┘
 ```
 
@@ -60,337 +59,205 @@ The AI Travel Agent uses a simplified, direct architecture leveraging AgentCore 
 - Real-time status updates during agent execution
 - Source attribution display for recommendations
 - Responsive design for mobile and desktop
-- Authentication flow integration
+- Authentication flow integration with Cognito
 
 **Key Features**:
 ```typescript
 interface TravelRequest {
-  destination: string;
-  dates: { start: Date; end: Date };
-  partySize: number;
-  ages: number[];
-  budget: number;
-  preferences: string[];
+  prompt: string;
+  user_id?: string;
+  region?: string;
 }
 
-interface TravelResponse {
-  itinerary: Itinerary;
-  sources: SourceAttribution[];
-  confidence: number;
-  alternatives: Alternative[];
+interface TravelOrchestratorResponse {
+  response_type: "flights" | "accommodations" | "restaurants" | "attractions" | "itinerary" | "mixed_results" | "conversation";
+  response_status: "complete_success" | "partial_success" | "validation_error" | "tool_error" | "system_error";
+  message: string;
+  flight_results?: FlightResult[];
+  accommodation_results?: PropertyResult[];
+  restaurant_results?: RestaurantResult[];
+  attraction_results?: AttractionResult[];
+  itinerary?: Itinerary;
+  success: boolean;
+  processing_time_seconds: number;
+  tool_progress: ToolProgress[];
 }
 ```
 
-### 2. AgentCore Runtime Direct Integration
+**Direct AgentCore Integration**:
+```typescript
+const agentResponse = await fetch(
+  `https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/${AGENT_ARN}/invocations`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${cognitoToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ prompt: userMessage })
+  }
+);
+```
+
+### 2. Travel Orchestrator Agent
 **Technology**: Strands Agents SDK + AgentCore Runtime + BedrockAgentCoreApp
 
-**Architecture Pattern**: Direct HTTP invocation with streaming responses
+**Architecture Pattern**: Single agent with multiple integrated tools
 
-**Request Flow**:
-```python
-from strands import Agent
-from bedrock_agentcore import BedrockAgentCoreApp
-
-agent = Agent()
-app = BedrockAgentCoreApp()
-
-@app.entrypoint
-async def agent_invocation(payload):
-    """Direct entry point for travel planning requests"""
-    
-    # 1. Extract user context from JWT (handled by AgentCore)
-    user_id = payload.get("user_id")  # From JWT claims
-    travel_request = payload.get("prompt")
-    
-    # 2. Initialize travel planner with memory
-    travel_agent = TravelPlannerAgent(
-        user_id=user_id,
-        memory=AgentCoreMemory(user_id=user_id)
-    )
-    
-    # 3. Stream responses in real-time
-    stream = travel_agent.stream_async(travel_request)
-    async for event in stream:
-        yield event  # Real-time streaming to client
-```
-
-**Direct Invocation**:
-```bash
-# Frontend directly calls AgentCore Runtime endpoint
-curl -X POST "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/{agent_arn}/invocations" \
-  -H "Authorization: Bearer {cognito_jwt_token}" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Plan a trip to Paris for 2 people in June"}'
-```
-
-### 3. Multi-Agent System (Specialized AgentCore Runtime Instances)
-
-**MVP Agent Architecture**: 5 specialized micro-agents for parallel execution
-
-**1. Travel Orchestrator Agent** (Main AgentCore Runtime)
+**Agent Implementation**:
 ```python
 from strands import Agent, tool
 from bedrock_agentcore import BedrockAgentCoreApp
-import asyncio
-import httpx
-
-app = BedrockAgentCoreApp()
+from bedrock_agentcore.memory import MemoryClient
 
 class TravelOrchestratorAgent(Agent):
-    def __init__(self, user_id: str):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0",
-            memory=AgentCoreMemory(user_id=user_id)
+    def __init__(self, memory_id: Optional[str] = None, session_id: Optional[str] = None, 
+                 actor_id: Optional[str] = None, region: str = "us-east-1"):
+        # Configure Nova Premier model for enhanced reasoning
+        model = BedrockModel(
+            model_id="us.amazon.nova-premier-v1:0",
+            max_tokens=10000,
+            temperature=0.7
         )
-        self.user_id = user_id
-        self.specialist_agents = {
-            "flights": "arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/flight-agent",
-            "airbnb": "arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/airbnb-agent", 
-            "booking": "arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/booking-agent",
-            "food": "arn:aws:bedrock-agentcore:us-east-1:123456789:agent-runtime/food-agent"
-        }
+        
+        # Initialize with integrated tools
+        super().__init__(
+            model=model,
+            tools=[
+                self.search_flights,        # Amadeus API integration
+                self.search_accommodations, # Nova Act browser automation
+                # Google Maps tools auto-discovered via MCP Gateway
+            ],
+            hooks=[memory_hooks] if memory_id else []
+        )
     
     @tool
-    async def comprehensive_travel_search(self, destination: str, dates: dict, 
-                                        travelers: int, budget: float) -> dict:
-        """Orchestrate parallel search across all specialized agents"""
-        
-        # Prepare search parameters
-        search_params = {
-            "destination": destination,
-            "dates": dates,
-            "travelers": travelers,
-            "budget": budget
-        }
-        
-        # Execute parallel agent calls
-        tasks = []
-        
-        # Flight search
-        tasks.append(self._invoke_specialist_agent("flights", search_params))
-        
-        # Parallel accommodation searches (Airbnb + Booking.com)
-        tasks.append(self._invoke_specialist_agent("airbnb", search_params))
-        tasks.append(self._invoke_specialist_agent("booking", search_params))
-        
-        # Food recommendations
-        tasks.append(self._invoke_specialist_agent("food", search_params))
-        
-        # Wait for all agents to complete
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Synthesize results from all agents
-        return self._synthesize_multi_agent_results(results, search_params)
+    def search_flights(self, origin: str, destination: str, departure_date: str, 
+                      return_date: Optional[str] = None, passengers: int = 1) -> TravelOrchestratorResponse:
+        """Search flights using Amadeus Flight Offers Search API"""
+        return search_flights_direct(origin, destination, departure_date, return_date, passengers)
     
-    async def _invoke_specialist_agent(self, agent_type: str, params: dict):
-        """Invoke a specialist agent and return results"""
-        agent_arn = self.specialist_agents[agent_type]
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/{agent_arn}/invocations",
-                headers={
-                    "Authorization": f"Bearer {self._get_agent_token()}",
-                    "Content-Type": "application/json"
-                },
-                json={"prompt": f"Search {agent_type}", "params": params},
-                timeout=60.0
-            )
-            return {"agent": agent_type, "results": response.json()}
-
-@app.entrypoint
-async def orchestrator_invocation(payload):
-    """Main orchestrator entry point"""
-    user_id = payload.get("user_id")
-    travel_request = payload.get("prompt")
-    
-    orchestrator = TravelOrchestratorAgent(user_id=user_id)
-    
-    # Stream orchestrated responses
-    stream = orchestrator.stream_async(travel_request)
-    async for event in stream:
-        yield event
-```
-
-**2. Flight Specialist Agent** (Dedicated AgentCore Runtime with Nova Act)
-```python
-# flight_agent.py
-from strands import Agent, tool
-from bedrock_agentcore import BedrockAgentCoreApp
-from nova_act import NovaAct
+    @tool  
+    def search_accommodations(self, destination: str, departure_date: str, return_date: str,
+                            passengers: int = 2, rooms: int = 1, platform_preference: str = "both") -> TravelOrchestratorResponse:
+        """Search accommodations using Nova Act browser automation"""
+        return search_accommodations_direct(destination, departure_date, return_date, passengers, rooms, platform_preference)
 
 app = BedrockAgentCoreApp()
 
-class FlightSpecialistAgent(Agent):
-    def __init__(self):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0"  # More capable model for browser tasks
-        )
-    
-    @tool
-    def search_flights(self, origin: str, destination: str, 
-                      departure_date: str, return_date: str = None) -> dict:
-        """Search flights using Nova Act browser automation"""
-        
-        with NovaAct(starting_page="https://www.google.com/travel/flights") as nova:
-            nova.act(f"Search for flights from {origin} to {destination}")
-            nova.act(f"Set departure date to {departure_date}")
-            if return_date:
-                nova.act(f"Set return date to {return_date}")
-            
-            result = nova.act(
-                "Extract first 20 flight options with prices, airlines, times, and durations",
-                schema=FlightSearchResults.model_json_schema()
-            )
-            
-            return {
-                "platform": "google_flights",
-                "flights": result.parsed_response.flights if result.matches_schema else [],
-                "metadata": {"search_method": "nova_act", "source": "Google Flights"}
-            }
-
 @app.entrypoint
-async def flight_agent_invocation(payload):
-    agent = FlightSpecialistAgent()
-    stream = agent.stream_async(payload["prompt"])
-    async for event in stream:
-        yield event
+def travel_orchestrator_invocation(payload, context=None):
+    """Non-streaming JSON response entry point"""
+    agent = TravelOrchestratorAgent(
+        memory_id=initialize_memory(),
+        session_id=context.session_id if context else None,
+        actor_id="travel-orchestrator"
+    )
+    
+    result = agent(payload["prompt"])
+    return parse_agent_response(result)
 ```
 
-**3. Airbnb Specialist Agent** (Dedicated AgentCore Runtime with Nova Act)
+### 3. Integrated Tool System
+
+The Travel Orchestrator Agent uses **integrated tools** rather than separate agents for better reliability and performance.
+
+**Tool Architecture**:
+
+**1. Flight Search Tool (Amadeus API Integration)**
 ```python
-# airbnb_agent.py
-from strands import Agent, tool
-from bedrock_agentcore import BedrockAgentCoreApp
-from nova_act import NovaAct
+# tools/flight_search_tool.py
+from amadeus import Client
 
-app = BedrockAgentCoreApp()
+def search_flights_direct(origin: str, destination: str, departure_date: str, 
+                         return_date: Optional[str] = None, passengers: int = 1) -> TravelOrchestratorResponse:
+    """Search flights using Amadeus Flight Offers Search API"""
+    
+    # Initialize Amadeus client
+    amadeus = Client(
+        client_id=os.getenv('AMADEUS_CLIENT_ID'),
+        client_secret=os.getenv('AMADEUS_CLIENT_SECRET'),
+        hostname=os.getenv('AMADEUS_HOSTNAME', 'test')
+    )
+    
+    # Search flights
+    response = amadeus.shopping.flight_offers_search.get(
+        originLocationCode=origin.upper(),
+        destinationLocationCode=destination.upper(),  
+        departureDate=departure_date,
+        returnDate=return_date,
+        adults=passengers,
+        currencyCode='USD'
+    )
+    
+    # Parse and return structured results
+    return TravelOrchestratorResponse(
+        response_type=ResponseType.FLIGHTS,
+        flight_results=parse_amadeus_results(response.data),
+        success=True
+    )
+```
 
-class AirbnbSpecialistAgent(Agent):
-    def __init__(self):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0"  # More capable for browser tasks
+**2. Accommodation Search Tool (Nova Act Browser Automation)**
+```python
+# tools/accommodation_search_tool.py
+from common.browser_wrapper import BrowserWrapper
+
+def search_accommodations_direct(location: str, check_in: str, check_out: str,
+                               guests: int = 2, rooms: int = 1, 
+                               platform_preference: str = "both") -> TravelOrchestratorResponse:
+    """Search accommodations using Nova Act browser automation"""
+    
+    browser_wrapper = BrowserWrapper(
+        api_key=os.getenv('NOVA_ACT_API_KEY'),
+        use_agentcore_browser=True
+    )
+    
+    # Search both platforms
+    airbnb_results = search_airbnb(browser_wrapper, location, check_in, check_out, guests)
+    booking_results = search_booking_com(browser_wrapper, location, check_in, check_out, guests, rooms)
+    
+    # Combine and rank results
+    best_accommodations = combine_and_sort_results(airbnb_results, booking_results)
+    
+    return TravelOrchestratorResponse(
+        response_type=ResponseType.ACCOMMODATIONS,
+        accommodation_results=best_accommodations,
+        success=True
+    )
+```
+
+**3. Google Maps Integration (MCP Gateway)**
+```python
+# Google Maps tools auto-discovered via MCP client
+def initialize_google_maps_tools():
+    """Initialize Google Maps tools via AgentCore Gateway"""
+    
+    # Create MCP transport to Gateway
+    def create_gateway_transport():
+        return streamablehttp_client(
+            gateway_url,
+            headers={"Authorization": f"Bearer {access_token}"}
         )
     
-    @tool
-    def search_airbnb(self, location: str, check_in: str, check_out: str, guests: int) -> dict:
-        """Search Airbnb using Nova Act browser automation"""
-        
-        with NovaAct(starting_page="https://www.airbnb.com") as nova:
-            nova.act(f"Search for accommodations in {location}")
-            nova.act(f"Set check-in date to {check_in}")
-            nova.act(f"Set check-out date to {check_out}")
-            nova.act(f"Set number of guests to {guests}")
-            
-            result = nova.act(
-                "Extract first 20 property listings with titles, prices, ratings, and amenities",
-                schema=PropertySearchResults.model_json_schema()
-            )
-            
-            return {
-                "platform": "airbnb",
-                "properties": result.parsed_response.listings if result.matches_schema else [],
-                "metadata": {"search_method": "nova_act", "source": "Airbnb"}
-            }
-
-@app.entrypoint 
-async def airbnb_agent_invocation(payload):
-    agent = AirbnbSpecialistAgent()
-    stream = agent.stream_async(payload["prompt"])
-    async for event in stream:
-        yield event
-```
-
-**4. Booking.com Specialist Agent** (Dedicated AgentCore Runtime with Nova Act)
-```python
-# booking_agent.py  
-from strands import Agent, tool
-from bedrock_agentcore import BedrockAgentCoreApp
-from nova_act import NovaAct
-
-app = BedrockAgentCoreApp()
-
-class BookingSpecialistAgent(Agent):
-    def __init__(self):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0"  # More capable for browser tasks
-        )
+    # Initialize MCP client
+    mcp_client = MCPClient(create_gateway_transport)
+    mcp_client.start()
     
-    @tool
-    def search_booking(self, location: str, check_in: str, check_out: str, guests: int) -> dict:
-        """Search Booking.com using Nova Act browser automation"""
-        
-        with NovaAct(starting_page="https://www.booking.com") as nova:
-            nova.act(f"Search for accommodations in {location}")
-            nova.act(f"Set check-in date to {check_in}")
-            nova.act(f"Set check-out date to {check_out}")
-            nova.act(f"Set number of guests to {guests}")
-            
-            result = nova.act(
-                "Extract first 20 hotel listings with names, prices, ratings, and amenities",
-                schema=HotelSearchResults.model_json_schema()
-            )
-            
-            return {
-                "platform": "booking_com",
-                "hotels": result.parsed_response.listings if result.matches_schema else [],
-                "metadata": {"search_method": "nova_act", "source": "Booking.com"}
-            }
-
-@app.entrypoint
-async def booking_agent_invocation(payload):
-    agent = BookingSpecialistAgent()
-    stream = agent.stream_async(payload["prompt"])
-    async for event in stream:
-        yield event
-```
-
-**5. Food Specialist Agent** (Dedicated AgentCore Runtime)
-```python
-# food_agent.py
-from strands import Agent, tool  
-from bedrock_agentcore import BedrockAgentCoreApp
-from tools.yelp_api import YelpFusionAPI
-
-app = BedrockAgentCoreApp()
-
-class FoodSpecialistAgent(Agent):
-    def __init__(self):
-        super().__init__(
-            model="anthropic.claude-3-haiku-20240307-v1:0"  # Faster model for API calls
-        )
-        self.yelp_api = YelpFusionAPI()
+    # Auto-discover Google Maps tools
+    google_maps_tools = mcp_client.list_tools_sync()
     
-    @tool
-    def search_restaurants(self, location: str, preferences: list = None) -> dict:
-        """Search restaurants using Yelp Fusion API"""
-        
-        results = self.yelp_api.search_restaurants(
-            location=location,
-            categories="restaurants,bars,cafes",
-            limit=30
-        )
-        
-        return {
-            "platform": "yelp",
-            "restaurants": results,
-            "metadata": {"search_method": "api", "source": "Yelp Fusion API"}
-        }
-
-@app.entrypoint
-async def food_agent_invocation(payload):
-    agent = FoodSpecialistAgent()
-    stream = agent.stream_async(payload["prompt"])
-    async for event in stream:
-        yield event
+    # Available tools: searchPlacesByText, searchNearbyPlaces, getPlaceDetails
+    return google_maps_tools
 ```
 
-**Multi-Agent Benefits**:
-- **True Parallelization**: Airbnb and Booking.com searches run simultaneously
-- **Fault Isolation**: One platform failure doesn't affect others
-- **Independent Scaling**: Scale each agent based on platform demand
-- **Specialized Optimization**: Different models for different complexity levels
-- **Resource Efficiency**: No resource contention between search operations
+**Single-Agent Benefits**:
+- **Simplified Architecture**: No inter-agent communication complexity
+- **Better Error Handling**: Single point of failure management
+- **Faster Response Times**: No network overhead between agents
+- **Easier Debugging**: Single execution context
+- **Resource Efficiency**: Shared memory and processing
+- **Consistent State**: Single agent maintains conversation context
 
 ### 4. Browser Automation Layer
 
@@ -425,12 +292,16 @@ class AccommodationSearchTool(Tool):
 
 | Platform | Access Method | Data Type | Rate Limits |
 |----------|---------------|-----------|-------------|
-| Google Flights | Browser Automation (Nova Act) | Flight prices, schedules | Self-imposed: 1 req/3sec |
-| Yelp Fusion | REST API (Free) | Restaurant/activity data | 5K calls/day |
+| Amadeus Flight API | REST API | Real-time flight prices & schedules | 2,000 calls/month (free tier) |
+| Google Maps API | REST API via Gateway | Restaurant/attraction data | Via Google Cloud quotas |
 | Airbnb | Browser Automation (Nova Act) | Accommodation listings | Self-imposed: 1 req/2sec |
 | Booking.com | Browser Automation (Nova Act) | Hotel listings | Self-imposed: 1 req/2sec |
 
-**Note**: Google Flights does not provide a public API. Browser automation via Nova Act is the only viable method to access real-time flight data.
+**Current Implementation Notes**:
+- **Flights**: Amadeus API provides real-time, accurate flight pricing and schedules
+- **Restaurants/Attractions**: Google Maps API via AgentCore Gateway with MCP client
+- **Accommodations**: Nova Act browser automation for platforms without public APIs
+- **Authentication**: All APIs use secure credential storage via AWS Systems Manager
 
 ### 6. Memory & Personalization System
 
@@ -605,178 +476,123 @@ def search_comprehensive_travel(destination: str):
 
 ## Deployment Architecture
 
-### 1. AgentCore Starter Toolkit Deployment Workflow
+### 1. Single Agent Deployment Workflow
 
-**Complete Multi-Agent Deployment Script**
+**Travel Orchestrator Agent Deployment** (Current Implementation)
 ```bash
 #!/bin/bash
 
 # Prerequisites setup
-echo "Setting up Travel Agent Multi-Agent System..."
+echo "Setting up Travel Agent Single-Agent System..."
 
-# Install AgentCore starter toolkit
-pip install amazon-bedrock-agentcore nova-act
+# Install required packages
+pip install boto3 strands amazon-bedrock-agentcore
 
-# Verify installation
-agentcore --version
+# Set up AWS credentials and region
+export AWS_DEFAULT_REGION=us-east-1
 
-# Deploy all 5 agents in sequence
+# Deploy infrastructure first
+cd cdk
+npm install
+npm run deploy
 
-# 1. Deploy Flight Specialist Agent
-echo "Deploying Flight Specialist Agent..."
-cd agents/flight-agent
-agentcore configure \
-  --entrypoint flight_agent.py \
-  --name flight-agent \
-  --execution-role $FLIGHT_AGENT_ROLE_ARN \
-  --requirements-file requirements-browser.txt \
-  --memory-size 2048 \
-  --model "anthropic.claude-3-5-sonnet-20241022-v2:0" \
-  --browser-tool-enabled
-agentcore launch
-export FLIGHT_AGENT_ARN=$(agentcore get-runtime --name flight-agent --output json | jq -r '.agentRuntimeArn')
+# Deploy the single travel orchestrator agent
+cd ../agents/travel_orchestrator
+./deploy-travel-orchestrator.sh
 
-# 2. Deploy Food Specialist Agent  
-echo "Deploying Food Specialist Agent..."
-cd ../food-agent
-agentcore configure \
-  --entrypoint food_agent.py \
-  --name food-agent \
-  --execution-role $FOOD_AGENT_ROLE_ARN \
-  --requirements-file requirements-yelp.txt \
-  --memory-size 512 \
-  --model "anthropic.claude-3-haiku-20240307-v1:0"
-agentcore launch
-export FOOD_AGENT_ARN=$(agentcore get-runtime --name food-agent --output json | jq -r '.agentRuntimeArn')
-
-# 3. Deploy Airbnb Specialist Agent
-echo "Deploying Airbnb Specialist Agent..."
-cd ../airbnb-agent
-agentcore configure \
-  --entrypoint airbnb_agent.py \
-  --name airbnb-agent \
-  --execution-role $AIRBNB_AGENT_ROLE_ARN \
-  --requirements-file requirements-browser.txt \
-  --memory-size 2048 \
-  --model "anthropic.claude-3-5-sonnet-20241022-v2:0" \
-  --browser-tool-enabled
-agentcore launch
-export AIRBNB_AGENT_ARN=$(agentcore get-runtime --name airbnb-agent --output json | jq -r '.agentRuntimeArn')
-
-# 4. Deploy Booking.com Specialist Agent
-echo "Deploying Booking.com Specialist Agent..."
-cd ../booking-agent
-agentcore configure \
-  --entrypoint booking_agent.py \
-  --name booking-agent \
-  --execution-role $BOOKING_AGENT_ROLE_ARN \
-  --requirements-file requirements-browser.txt \
-  --memory-size 2048 \
-  --model "anthropic.claude-3-5-sonnet-20241022-v2:0" \
-  --browser-tool-enabled
-agentcore launch
-export BOOKING_AGENT_ARN=$(agentcore get-runtime --name booking-agent --output json | jq -r '.agentRuntimeArn')
-
-# 5. Deploy Travel Orchestrator Agent (with Memory and Authentication)
-echo "Deploying Travel Orchestrator Agent..."
-cd ../orchestrator-agent
-agentcore configure \
-  --entrypoint orchestrator_agent.py \
-  --name travel-orchestrator \
-  --execution-role $ORCHESTRATOR_ROLE_ARN \
-  --requirements-file requirements.txt \
-  --memory-size 2048 \
-  --model "anthropic.claude-3-5-sonnet-20241022-v2:0" \
-  --memory-config '{"strategy": "user_preferences"}' \
-  --authorizer-config '{"customJWTAuthorizer":{"discoveryUrl":"'$COGNITO_DISCOVERY_URL'","allowedClients":["'$COGNITO_CLIENT_ID'"]}}'
-agentcore launch
-export ORCHESTRATOR_AGENT_ARN=$(agentcore get-runtime --name travel-orchestrator --output json | jq -r '.agentRuntimeArn')
-
-echo "All agents deployed successfully!"
-echo "Flight Agent ARN: $FLIGHT_AGENT_ARN"
-echo "Food Agent ARN: $FOOD_AGENT_ARN"
-echo "Airbnb Agent ARN: $AIRBNB_AGENT_ARN"
-echo "Booking Agent ARN: $BOOKING_AGENT_ARN"
-echo "Orchestrator Agent ARN: $ORCHESTRATOR_AGENT_ARN"
+echo "Travel Orchestrator Agent deployed successfully!"
 
 # Test end-to-end system
-echo "Testing complete multi-agent system..."
-agentcore invoke \
-  --name travel-orchestrator \
-  --bearer-token $COGNITO_ACCESS_TOKEN \
-  '{"prompt": "Plan a trip to Paris for 2 people in June with a $3000 budget"}'
+echo "Testing travel orchestrator..."
+python -c "
+from travel_orchestrator import travel_orchestrator_invocation
+result = travel_orchestrator_invocation({'prompt': 'Find flights from JFK to CDG on Dec 15, 2024'})
+print('Test result:', result)
+"
 ```
 
-### 2. Hybrid Deployment: CDK + AgentCore Integration
+**Manual Deployment via AgentCore CLI** (Alternative)
+```bash
+# If using AgentCore CLI (experimental)
+agentcore configure \
+  --entrypoint travel_orchestrator.py \
+  --name travel-orchestrator \
+  --execution-role $TRAVEL_ORCHESTRATOR_ROLE_ARN \
+  --requirements-file requirements.txt \
+  --memory-size 4096 \
+  --model "us.amazon.nova-premier-v1:0" \
+  --memory-config '{"strategy": "user_preferences"}' \
+  --authorizer-config '{"customJWTAuthorizer":{"discoveryUrl":"'$COGNITO_DISCOVERY_URL'","allowedClients":["'$COGNITO_CLIENT_ID'"]}}'
 
-**CDK Stack with AgentCore Integration**
+agentcore launch
+```
+
+### 2. Infrastructure Deployment via CDK
+
+**CDK Stack for Supporting Infrastructure**
 ```typescript
 export class TravelAgentStack extends Stack {
   constructor(scope: Construct, id: string, props: StackProps) {
     super(scope, id, props);
     
     // 1. Deploy Cognito for authentication
-    const authStack = new CognitoStack(this, 'Auth');
-    
-    // 2. Deploy frontend hosting
-    const frontendStack = new S3CloudFrontStack(this, 'Frontend');
-    
-    // 3. Create IAM roles for AgentCore agents
-    const agentRoles = new AgentExecutionRolesStack(this, 'AgentRoles');
-    
-    // 4. Output configuration for AgentCore deployment
-    new CfnOutput(this, 'CognitoPoolId', {
-      value: authStack.userPool.userPoolId,
-      description: 'Cognito User Pool ID for AgentCore authorization'
+    const cognitoStack = new CognitoStack(this, 'CognitoStack', {
+      environment: props.environment,
     });
     
-    new CfnOutput(this, 'CognitoClientId', {
-      value: authStack.userPoolClient.userPoolClientId,
-      description: 'Cognito Client ID for AgentCore authorization'
+    // 2. Deploy frontend hosting (S3 + CloudFront)
+    const frontendBucket = new s3.Bucket(this, 'FrontendBucket', {
+      bucketName: `travel-agent-frontend-${props.environment}-${cdk.Aws.ACCOUNT_ID}-${cdk.Aws.REGION}`,
+      // ... bucket configuration
     });
     
-    new CfnOutput(this, 'FlightAgentRoleArn', {
-      value: agentRoles.flightAgentRole.roleArn,
-      description: 'Execution role for Flight Agent'
+    const distribution = new cloudfront.Distribution(this, 'FrontendDistribution', {
+      // ... CloudFront configuration
     });
     
-    // Custom resource to deploy agents using AgentCore starter toolkit
-    const agentDeployment = new CustomResource(this, 'AgentDeployment', {
-      serviceToken: agentDeploymentLambda.functionArn,
-      properties: {
-        CognitoPoolId: authStack.userPool.userPoolId,
-        CognitoClientId: authStack.userPoolClient.userPoolClientId,
-        ExecutionRoles: {
-          flight: agentRoles.flightAgentRole.roleArn,
-          food: agentRoles.foodAgentRole.roleArn,
-          airbnb: agentRoles.airbnbAgentRole.roleArn,
-          booking: agentRoles.bookingAgentRole.roleArn,
-          orchestrator: agentRoles.orchestratorRole.roleArn
-        }
-      }
+    // 3. Create S3 bucket for Gateway OpenAPI specifications
+    const gatewayBucket = new s3.Bucket(this, 'GatewayOpenAPIBucket', {
+      bucketName: `travel-agent-gateway-${props.environment}-${cdk.Aws.ACCOUNT_ID}-${cdk.Aws.REGION}`,
+      // ... gateway bucket configuration
+    });
+    
+    // 4. Output configuration for manual agent deployment
+    new CfnOutput(this, 'CognitoUserPoolId', {
+      value: cognitoStack.userPool.userPoolId,
+      exportName: `TravelAgent-${props.environment}-UserPoolId`,
+    });
+    
+    new CfnOutput(this, 'CognitoUserPoolClientId', {
+      value: cognitoStack.userPoolClient.userPoolClientId,
+      exportName: `TravelAgent-${props.environment}-UserPoolClientId`,
     });
   }
 }
 ```
 
-### 3. Agent Resource Requirements
+### 3. Current Resource Requirements
 
-| Agent | Memory | Model | Browser Tools | Estimated Cost/Hour |
-|-------|--------|-------|---------------|-------------------|
-| Flight Agent | 2048 MB | Claude 3.5 Sonnet | Enabled | $0.08 |
-| Food Agent | 512 MB | Claude 3 Haiku | Disabled | $0.02 |
-| Airbnb Agent | 2048 MB | Claude 3.5 Sonnet | Enabled | $0.08 |
-| Booking Agent | 2048 MB | Claude 3.5 Sonnet | Enabled | $0.08 |
-| Orchestrator | 2048 MB | Claude 3.5 Sonnet | Disabled | $0.06 |
+**Single Travel Orchestrator Agent**:
+- **Memory**: 4GB (increased for Nova Premier model)
+- **Model**: Amazon Nova Premier v1.0 
+- **Browser Tools**: Enabled for accommodation search
+- **Memory**: AgentCore Memory enabled for personalization
+- **Estimated Cost**: ~$0.10-0.15/hour (consumption-based pricing)
 
-**Total Estimated Cost**: ~$0.32/hour for all 5 agents (consumption-based pricing)
+**Supporting Infrastructure**:
+- **S3 Buckets**: Frontend hosting + Gateway specs
+- **CloudFront**: Global content delivery
+- **Cognito**: User authentication
+- **Parameter Store**: Secure credential storage
+- **Gateway**: Google Maps API integration
 
 ### 4. Deployment Benefits
-- **Simplified Operations**: Single command deployment per agent
-- **Built-in Features**: Authentication, memory, browser tools, observability included
-- **Easy Testing**: Built-in `agentcore invoke` for immediate testing
-- **Rapid Iteration**: Quick deployment and testing cycles
-- **Production Ready**: Enterprise security and scaling built-in
+- **Simplified Architecture**: Single agent deployment eliminates complexity
+- **Built-in Features**: Authentication, memory, browser tools, observability included  
+- **Easy Testing**: Direct Python execution for local testing
+- **Rapid Iteration**: Quick development and testing cycles
+- **Production Ready**: Enterprise security and scaling via AgentCore Runtime
+- **Cost Effective**: Single agent reduces resource overhead
 
 ### 2. Environment Management
 - **Development**: Single region, reduced resources

@@ -1,21 +1,21 @@
 # Travel Orchestrator Agent
 
-The Travel Orchestrator Agent is the main conversational interface for comprehensive travel planning. It coordinates multiple specialist agents (flights, accommodations, restaurants) to create personalized travel plans through intelligent conversation management and parallel agent orchestration.
+The Travel Orchestrator Agent is a **single, intelligent agent** that provides comprehensive travel planning through integrated tools and data sources. It combines flight search, accommodation search, and restaurant recommendations into a unified conversational interface.
 
 ## Architecture Overview
 
-The Travel Orchestrator Agent follows a sophisticated multi-agent architecture:
+The Travel Orchestrator Agent uses a **single-agent architecture** with integrated tools:
 
 ```
-User Request → Travel Orchestrator → [Flight Agent, Accommodation Agent, Food Agent] → Synthesized Plan
+User Request → Travel Orchestrator Agent → [Amadeus API, Nova Act Browser, Google Maps API] → Synthesized Plan
 ```
 
 ### Key Components
 
 1. **Conversation Management**: Intelligent information gathering with context awareness
-2. **Validation System**: Tool-based validation ensures complete information before delegation
-3. **Agent Orchestration**: Parallel invocation of specialist agents via AgentCore Runtime
-4. **Plan Synthesis**: Combines results from multiple agents into coherent travel plans
+2. **Integrated Tools**: Direct integration with travel data sources
+3. **Parameter Validation**: Ensures complete information before tool execution
+4. **Result Synthesis**: Combines results from multiple data sources into coherent travel plans
 5. **Memory Integration**: AgentCore Memory for user preferences and context preservation
 
 ## Features
@@ -25,56 +25,55 @@ User Request → Travel Orchestrator → [Flight Agent, Accommodation Agent, Foo
 - Context-aware clarifying questions
 - Automatic inference of missing information (passengers = guests, etc.)
 - Date validation with past date rejection
+- Parameter mapping between different tools
 
-### 🔄 Multi-Agent Orchestration  
-- Parallel execution of specialist agents
-- Natural language delegation to specialist agents
-- Graceful handling of agent failures
-- Real-time streaming responses
+### 🔄 Integrated Tool Execution
+- **Flight Search**: Real-time Amadeus API integration
+- **Accommodation Search**: Nova Act browser automation for Airbnb & Booking.com
+- **Restaurant Search**: Google Maps API via AgentCore Gateway
+- Graceful error handling for tool failures
+- Real-time JSON responses with structured data
 
 ### 📊 Plan Synthesis
 - Cost estimation across all travel components
-- Intelligent recommendations (cheapest flights, best-rated hotels)
-- Confidence scoring based on agent success rates
-- Comprehensive travel plan generation
+- Intelligent recommendations (best value flights, highest-rated accommodations)
+- Confidence scoring based on tool success rates
+- Comprehensive travel plan generation with itineraries
 
 ### 💾 AgentCore Memory Integration
 - **Short-term Memory**: Conversation context preservation across turns
-- **Session Management**: Consistent session_id shared across all agents
-- **Actor Isolation**: Each agent has unique actor_id within shared session
+- **Session Management**: User-specific session tracking
 - **Automatic Memory Hooks**: Load context on initialization, save messages automatically
-- **Cross-Agent Context**: All specialist agents access shared conversation history
-- **Memory Expiry**: Conversations automatically expire after 7 days
+- **User Preferences**: Learning and applying travel preferences over time
+- **Memory Expiry**: Conversations automatically expire after 1 day (configurable)
 
-## Agent Tools
+## Integrated Tools
 
-### Core Validation Tool
+### Flight Search Tool
 ```python
 @tool
-def validate_travel_information(travel_info_dict: dict) -> ValidationResult:
-    """Validates travel information completeness before agent delegation"""
+def search_flights(self, origin: str, destination: str, departure_date: str, 
+                  return_date: Optional[str] = None, passengers: int = 1) -> TravelOrchestratorResponse:
+    """Search flights using Amadeus Flight Offers Search API"""
+    return search_flights_direct(origin, destination, departure_date, return_date, passengers)
 ```
 
-### Specialist Agent Integration Tools
+### Accommodation Search Tool
 ```python
-@tool  
-def search_flights(travel_request: str, session_id: str = None) -> AgentSearchResult:
-    """Delegates to flight specialist agent"""
-
 @tool
-def search_accommodations(travel_request: str, session_id: str = None) -> AgentSearchResult:
-    """Delegates to accommodation specialist agent"""
-
-@tool
-def search_restaurants(travel_request: str, session_id: str = None) -> AgentSearchResult:
-    """Delegates to food specialist agent"""
+def search_accommodations(self, destination: str, departure_date: str, return_date: str,
+                         passengers: int = 2, rooms: int = 1, 
+                         platform_preference: str = "both") -> TravelOrchestratorResponse:
+    """Search accommodations using Nova Act browser automation"""
+    return search_accommodations_direct(destination, departure_date, return_date, passengers, rooms, platform_preference)
 ```
 
-### Comprehensive Planning Tool
+### Google Maps Integration (Auto-discovered via MCP Gateway)
 ```python
-@tool
-def plan_comprehensive_trip(travel_info_dict: dict, session_id: str = None) -> ComprehensiveTravelPlan:
-    """Orchestrates all agents for complete travel planning"""
+# Google Maps tools are automatically discovered via MCP client:
+# - searchPlacesByText: Text-based place search for restaurants/attractions
+# - searchNearbyPlaces: Location-based search around specific points
+# - getPlaceDetails: Detailed information about specific places
 ```
 
 ## Conversation Flow Examples
@@ -110,35 +109,53 @@ Orchestrator: "Perfect! Let me search for:
 [Initiates parallel agent searches...]"
 ```
 
-## Required Information by Agent
+## Required Information by Tool
 
-### Flight Agent Requirements
-- ✅ **origin**: Departure city/airport
-- ✅ **destination**: Destination city  
-- ✅ **departure_date**: Specific departure date
-- ✅ **passengers**: Number of passengers
-- ✅ **return_date**: For round-trip flights
+### Flight Search Tool Requirements
+- ✅ **origin**: Departure city/airport (IATA codes preferred)
+- ✅ **destination**: Destination city/airport (IATA codes preferred)
+- ✅ **departure_date**: Specific departure date (YYYY-MM-DD format)
+- ✅ **passengers**: Number of passengers (1-9)
+- ⚠️ **return_date**: For round-trip flights (YYYY-MM-DD format)
 
-### Accommodation Agent Requirements  
-- ✅ **destination**: Destination city
-- ✅ **check_in**: Check-in date
-- ✅ **check_out**: Check-out date
-- ✅ **guests**: Number of guests
+### Accommodation Search Tool Requirements  
+- ✅ **destination**: Destination city or location
+- ✅ **departure_date**: Check-in date (YYYY-MM-DD format) 
+- ✅ **return_date**: Check-out date (YYYY-MM-DD format)
+- ✅ **passengers**: Number of guests (1-30)
+- ⚠️ **rooms**: Number of rooms (1-8, defaults to 1)
+- ⚠️ **platform_preference**: "airbnb", "booking", or "both" (defaults to "both")
 
-### Restaurant Agent Requirements
-- ✅ **destination**: Destination city (minimum)
-- ⚠️ **dietary_restrictions**: Optional but recommended
+### Google Maps Tool Requirements
+- ✅ **location**: Destination city (minimum)
+- ⚠️ **query**: Specific search terms (e.g., "Italian restaurants in Paris")
+- ⚠️ **type**: Place type filter (e.g., "restaurant", "tourist_attraction")
 
 ## Environment Variables
 
 ```bash
-# Specialist Agent ARNs
-FLIGHT_AGENT_ARN=arn:aws:bedrock-agentcore:us-east-1:account:agent-runtime/flight-agent
-ACCOMMODATION_AGENT_ARN=arn:aws:bedrock-agentcore:us-east-1:account:agent-runtime/accommodation-agent
-FOOD_AGENT_ARN=arn:aws:bedrock-agentcore:us-east-1:account:agent-runtime/food-agent
+# API Credentials (stored in AWS Systems Manager Parameter Store)
+AMADEUS_CLIENT_ID=your-amadeus-client-id
+AMADEUS_CLIENT_SECRET=your-amadeus-client-secret
+AMADEUS_HOSTNAME=test  # or 'production' for live data
+NOVA_ACT_API_KEY=your-nova-act-api-key
+
+# Gateway Configuration (for Google Maps API)
+GATEWAY_URL=your-gateway-url
+GATEWAY_CLIENT_ID=your-gateway-client-id
+GATEWAY_CLIENT_SECRET=your-gateway-client-secret
 
 # AWS Configuration
 AGENTCORE_REGION=us-east-1
+USE_AGENTCORE_BROWSER=true
+```
+
+### Parameter Store Setup
+```bash
+# Set up API credentials in AWS Systems Manager Parameter Store
+aws ssm put-parameter --name "/travel-agent/amadeus-client-id" --value "your-client-id" --type "SecureString"
+aws ssm put-parameter --name "/travel-agent/amadeus-client-secret" --value "your-client-secret" --type "SecureString"
+aws ssm put-parameter --name "/travel-agent/nova-act-api-key" --value "your-api-key" --type "SecureString"
 ```
 
 ## Deployment
@@ -155,14 +172,17 @@ pip install -r requirements.txt
 
 ### AgentCore Runtime Deployment
 ```bash
-# Deploy Travel Orchestrator Agent
+# Deploy Travel Orchestrator Agent (manual deployment using deployment script)
+./deploy-travel-orchestrator.sh
+
+# Alternative: Direct deployment (if AgentCore CLI is available)
 agentcore configure \
   --entrypoint travel_orchestrator.py \
   --name travel-orchestrator \
   --execution-role $ORCHESTRATOR_ROLE_ARN \
   --requirements-file requirements.txt \
-  --memory-size 2048 \
-  --model "amazon.nova-pro-v1:0" \
+  --memory-size 4096 \
+  --model "us.amazon.nova-premier-v1:0" \
   --memory-config '{"strategy": "user_preferences"}' \
   --authorizer-config '{"customJWTAuthorizer":{"discoveryUrl":"'$COGNITO_DISCOVERY_URL'","allowedClients":["'$COGNITO_CLIENT_ID'"]}}'
 
@@ -176,69 +196,88 @@ python travel_orchestrator.py
 
 ## Data Models
 
-### TravelInformation
-Core travel information structure for validation:
+### TravelOrchestratorResponse
+Main response structure for all travel planning interactions:
 ```python
-class TravelInformation(BaseModel):
-    destination: Optional[str]
-    origin: Optional[str] 
-    departure_date: Optional[date]
-    return_date: Optional[date]
-    passengers: Optional[int]
-    guests: Optional[int]
-    # ... additional fields
+class TravelOrchestratorResponse(BaseModel):
+    response_type: ResponseType  # flights, accommodations, restaurants, etc.
+    response_status: ResponseStatus  # complete_success, partial_success, etc.
+    message: str
+    flight_results: Optional[List[FlightResult]]
+    accommodation_results: Optional[List[PropertyResult]]
+    restaurant_results: Optional[List[RestaurantResult]]
+    attraction_results: Optional[List[AttractionResult]]
+    itinerary: Optional[Itinerary]
+    success: bool
+    processing_time_seconds: float
+    tool_progress: List[ToolProgress]
 ```
 
-### ValidationResult
-Validation results with completeness analysis:
+### FlightResult
+Structured flight search results from Amadeus API:
 ```python
-class ValidationResult(BaseModel):
-    can_search: Dict[str, bool]  # Agent readiness
-    missing_info: Dict[str, List[str]]  # Missing requirements
-    next_questions: List[str]  # Suggested questions
-    completeness_score: float  # 0-1 completeness
+class FlightResult(BaseModel):
+    airline: str
+    departure_time: str
+    arrival_time: str
+    departure_airport: str
+    arrival_airport: str
+    price: float
+    duration: str
+    stops: int
+    stop_details: Optional[str]
+    booking_class: str
 ```
 
-### ComprehensiveTravelPlan
-Synthesized travel plan from multiple agents:
+### PropertyResult
+Structured accommodation results from browser automation:
 ```python
-class ComprehensiveTravelPlan(BaseModel):
-    destination: str
-    origin: str
-    dates: Dict[str, str]
-    flight_results: Optional[AgentSearchResult]
-    accommodation_results: Optional[AgentSearchResult]  
-    restaurant_results: Optional[AgentSearchResult]
-    recommendations: Dict[str, Any]
-    total_estimated_cost: Optional[float]
+class PropertyResult(BaseModel):
+    platform: str  # "airbnb" or "booking_com"
+    title: str
+    price_per_night: Optional[float]
+    total_price: Optional[float]
+    rating: Optional[float]
+    review_count: Optional[int]
+    property_type: Optional[str]
+    location: Optional[str]
+    amenities: Optional[List[str]]
+    url: Optional[str]
 ```
 
 ## System Prompt Strategy
 
 The orchestrator uses a comprehensive system prompt that includes:
 
-1. **Role Definition**: Main conversational interface for travel planning
-2. **Workflow Rules**: Information gathering → Validation → Delegation → Synthesis
-3. **Critical Rules**: Validation-first approach, progressive disclosure
-4. **Agent Requirements**: Clear requirements for each specialist agent
-5. **Conversation Examples**: Concrete examples of interaction patterns
-6. **Memory Integration**: Guidelines for using AgentCore Memory
+1. **Role Definition**: Expert travel planning agent with comprehensive capabilities
+2. **Tool Integration**: Direct tool usage guidelines for flights, accommodations, and restaurants
+3. **Parameter Validation**: Complete parameter validation before tool execution
+4. **Response Format**: Mandatory JSON response format using TravelOrchestratorResponse
+5. **Request Type Detection**: Intelligent detection of user intent (specific vs. multiple options)
+6. **Google Maps Integration**: Direct usage of Google Places API tools
+7. **Memory Integration**: Guidelines for using AgentCore Memory for personalization
 
 ## Error Handling
 
-- **Agent Failures**: Graceful degradation with partial results
-- **Validation Errors**: Clear error messages with correction guidance  
+- **Tool Failures**: Graceful degradation with partial results and clear error messages
+- **Parameter Validation**: Comprehensive validation with specific error details
 - **Date Validation**: Rejection of past dates with helpful suggestions
-- **Missing Information**: Targeted questions to fill information gaps
-- **Network Issues**: Retry logic and fallback responses
+- **API Errors**: Amadeus API error handling with user-friendly messages
+- **Browser Automation**: Nova Act session management and error recovery
+- **Network Issues**: Retry logic and timeout handling
+- **Missing Credentials**: Clear guidance for API key setup
 
 ## Performance Characteristics
 
-- **Parallel Execution**: All specialist agents run simultaneously
-- **Streaming Responses**: Real-time updates as agents complete
-- **Memory Efficiency**: Intelligent context management
+- **Tool Execution**: Sequential tool execution with validation
+- **JSON Responses**: Fast, structured responses without streaming
+- **Memory Efficiency**: Intelligent context management with AgentCore Memory
 - **Session Management**: Context preservation across conversations
-- **Cost Optimization**: Validation prevents unnecessary agent calls
+- **Cost Optimization**: Parameter validation prevents unnecessary API calls
+- **API Performance**: 
+  - Flight Search: 3-5 seconds (Amadeus API)
+  - Accommodation Search: 15-30 seconds (browser automation)
+  - Restaurant Search: 2-3 seconds (Google Maps API)
 
 ## Testing
 
@@ -250,33 +289,58 @@ python -m pytest tests/test_agent_invocation.py
 ```
 
 ### Integration Tests  
-Test end-to-end orchestration flows:
+Test end-to-end tool integration:
 ```bash
-python -m pytest tests/test_orchestrator_integration.py
+python -m pytest tests/test_tool_integration.py
+python -m pytest tests/test_amadeus_integration.py
 ```
 
 ### Manual Testing
 ```bash
-# Test with sample travel request
-python test_orchestrator.py
+# Test individual tools
+python -c "
+from tools.flight_search_tool import search_flights_direct
+result = search_flights_direct('JFK', 'CDG', '2024-12-15', '2024-12-22', 2)
+print(result.message)
+"
+
+# Test the full orchestrator
+python travel_orchestrator.py
 ```
 
 ## Monitoring & Observability
 
 The agent provides comprehensive logging and metrics:
-- **Agent Invocation Tracking**: Success rates, response times
-- **Validation Metrics**: Completeness scores, missing information patterns
+- **Tool Execution Tracking**: Success rates, response times for each tool
+- **Parameter Validation Metrics**: Validation success rates, common errors
 - **Conversation Analytics**: Question patterns, user interaction flows
-- **Plan Generation Metrics**: Synthesis success rates, recommendation accuracy
+- **API Performance Metrics**: Amadeus API response times, error rates
+- **Browser Automation Metrics**: Nova Act success rates, failure modes
+- **Memory Usage**: AgentCore Memory utilization and performance
 
-## Future Enhancements
+## Current Capabilities & Future Enhancements
 
+### ✅ Currently Implemented
+- Real-time flight search with Amadeus API
+- Comprehensive accommodation search (Airbnb + Booking.com)
+- Restaurant and attraction recommendations via Google Maps
+- User authentication and session management
+- Memory integration for personalization
+- Structured JSON responses with comprehensive data
+
+### 🚧 In Development
+- Advanced personalization with user preference learning
+- Enhanced itinerary generation algorithms
+- Improved error handling and recovery
+- Performance optimizations
+
+### 📋 Future Enhancements
 - [ ] **Multi-City Trip Support**: Complex itinerary planning
 - [ ] **Budget Optimization**: Advanced cost analysis and recommendations
-- [ ] **Activity Integration**: Events and attractions planning
-- [ ] **Group Travel**: Advanced group coordination features
 - [ ] **Real-time Booking**: Direct booking integration
+- [ ] **Group Travel**: Advanced group coordination features
 - [ ] **Mobile Optimization**: Mobile-specific conversation flows
+- [ ] **Advanced Memory**: Long-term user preference learning
 
 ## Contributing
 
