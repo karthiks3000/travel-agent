@@ -131,7 +131,7 @@ class AgentCoreClientImpl implements AgentCoreClient {
       error: data.error as string,
       
       // New orchestrator response fields (pass through directly)
-      response_type: data.response_type as 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'itinerary',
+      response_type: data.response_type as 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary',
       response_status: data.response_status as any, // ResponseStatus type
       overall_progress_message: data.overall_progress_message as string,
       is_final_response: data.is_final_response as boolean,
@@ -144,6 +144,7 @@ class AgentCoreClientImpl implements AgentCoreClient {
       flight_results: data.flight_results as any,
       accommodation_results: data.accommodation_results as any,
       restaurant_results: data.restaurant_results as any,
+      attraction_results: data.attraction_results as any,
       itinerary: data.itinerary as import('../types/chat').TravelItinerary,
       
       // Additional metadata

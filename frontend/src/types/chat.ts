@@ -15,7 +15,7 @@ export interface Message {
     sessionId?: string;
     error?: boolean;
     responseStatus?: ResponseStatus;
-    responseType?: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'itinerary';
+    responseType?: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary';
     toolProgress?: ToolProgress[];
     overallProgressMessage?: string;
     isFinalResponse?: boolean;
@@ -330,7 +330,7 @@ export interface AgentCoreResponse {
   error?: string;
   
   // Orchestrator response fields
-  response_type: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'itinerary';
+  response_type: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary';
   response_status: ResponseStatus;
   overall_progress_message: string;
   is_final_response: boolean;
@@ -343,6 +343,7 @@ export interface AgentCoreResponse {
   flight_results?: FlightResult[];
   accommodation_results?: PropertyResult[];
   restaurant_results?: RestaurantResult[];
+  attraction_results?: AttractionResult[];
   itinerary?: TravelItinerary;
   
   // Additional metadata

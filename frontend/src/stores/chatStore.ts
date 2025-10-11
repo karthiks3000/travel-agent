@@ -144,6 +144,17 @@ export const useChatStore = create<ChatStore>()(
                 };
               }
               break;
+            case "attractions":
+              resultType = "attractions";
+              if (response.attraction_results) {
+                resultData = {
+                  type: "attractions" as const,
+                  attractions: response.attraction_results,
+                  total_results: response.attraction_results.length,
+                  timestamp: new Date()
+                };
+              }
+              break;
             case "itinerary":
               resultType = "itinerary";
               if (response.itinerary) {

@@ -404,11 +404,11 @@ AVAILABLE TOOLS:
 
 REQUEST TYPE DETECTION - Listen carefully to what users want:
 
-1. **SPECIFIC BEST OPTIONS**: "best flight", "cheapest hotel", "top-rated restaurant"
+1. **SPECIFIC BEST OPTIONS**: "best flight", "cheapest hotel", "top-rated restaurant", "best attractions"
    → Call appropriate tools and return 1 result
    → response_type: "flights", "accommodations", "restaurants", or "attractions"
 
-2. **MULTIPLE OPTIONS**: "show me 5 flights", "give me hotel options under $200", "find 3 Italian restaurants"
+2. **MULTIPLE OPTIONS**: "show me 5 flights", "give me hotel options under $200", "find 3 Italian restaurants", "attractions in Toronto", "sightseeing in Paris", "tourist attractions", "places to visit", "museums in Rome"
    → Call appropriate tools and return multiple results (2-10)
    → response_type: "flights", "accommodations", "restaurants", or "attractions"
 
@@ -429,11 +429,12 @@ For Restaurant Searches:
 - Parse results and format into RestaurantResult objects with all required fields
 - Return in restaurant_results array
 
-For Attraction Searches:
+For Attraction Searches (sightseeing, places to visit, tourist attractions, museums, parks, landmarks):
 - Call searchPlacesByText with query like "museums in Paris" or "attractions in Rome"  
 - Use type="tourist_attraction" parameter
 - Parse results and format into AttractionResult objects with all required fields
 - Estimate visit_duration_estimate based on place types (museums=120min, parks=60min, etc.)
+- ALWAYS use response_type: "attractions" for attraction-only requests
 - Return in attraction_results array
 
 GOOGLE PLACES RESPONSE FORMATTING:
@@ -521,12 +522,30 @@ TOOL CALLING RULES:
 
 RESPONSE FORMATS:
 
-Single Component (flights only):
+Single Component Examples:
+
+Flights Only:
 {{
   "response_type": "flights",
   "message": "Found 5 flight options for your NYC to Paris trip.",
   "flight_results": [FlightResult, FlightResult, ...],
   "estimated_costs": {{"flights": 890}},
+  "success": true
+}}
+
+Attractions Only:
+{{
+  "response_type": "attractions",
+  "message": "Discover Toronto's best winter attractions!",
+  "attraction_results": [AttractionResult, AttractionResult, ...],
+  "success": true
+}}
+
+Restaurants Only:
+{{
+  "response_type": "restaurants", 
+  "message": "Found great Italian restaurants in Rome.",
+  "restaurant_results": [RestaurantResult, RestaurantResult, ...],
   "success": true
 }}
 

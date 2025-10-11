@@ -7,14 +7,19 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { useChatResults } from '@/stores/chatStore';
-import { BarChart3, Plane, Building, UtensilsCrossed, MapPin, AlertCircle } from 'lucide-react';
-import type { ResultData, FlightSearchResults, AccommodationSearchResults, TravelItinerary, RestaurantResult } from '@/types/chat';
+import { BarChart3, Plane, Building, UtensilsCrossed, MapPin, AlertCircle, ExternalLink, Camera } from 'lucide-react';
+import type { ResultData, FlightSearchResults, AccommodationSearchResults, TravelItinerary, RestaurantResult, AttractionResult } from '@/types/chat';
 import { FlightOptions, AccommodationOptions } from '@/components/travel/ComponentResults';
 import { ItineraryTimeline } from '@/components/travel/ItineraryTimeline';
 
 interface ResultsPanelProps {
   className?: string;
 }
+
+// Utility function to generate Google Maps URL from place_id
+const getGoogleMapsUrl = (placeId: string): string => {
+  return `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+};
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
   const { currentResults, resultType } = useChatResults();
@@ -27,6 +32,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
         return <Building className="w-5 h-5" />;
       case 'restaurants':
         return <UtensilsCrossed className="w-5 h-5" />;
+      case 'attractions':
+        return <Camera className="w-5 h-5" />;
       case 'itinerary':
         return <MapPin className="w-5 h-5" />;
       default:
@@ -42,6 +49,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
         return 'Accommodation Results';
       case 'restaurants':
         return 'Restaurant Results';
+      case 'attractions':
+        return 'Attraction Results';
       case 'itinerary':
         return 'Trip Itinerary';
       default:
@@ -96,6 +105,10 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
                   Restaurant recommendations
                 </li>
                 <li className="flex items-center justify-center">
+                  <Camera className="w-4 h-4 mr-2" />
+                  Tourist attractions
+                </li>
+                <li className="flex items-center justify-center">
                   <MapPin className="w-4 h-4 mr-2" />
                   Complete trip itineraries
                 </li>
@@ -147,6 +160,8 @@ const ResultsContent: React.FC<ResultsContentProps> = ({ results }) => {
       return <AccommodationResultsContent results={results as AccommodationSearchResults} />;
     case 'restaurants':
       return <RestaurantResultsContent results={results} />;
+    case 'attractions':
+      return <AttractionResultsContent results={results} />;
     case 'itinerary':
       return <ItineraryResultsContent results={results} />;
     default:
@@ -184,6 +199,76 @@ const AccommodationResultsContent: React.FC<{ results: AccommodationSearchResult
   return <AccommodationOptions accommodations={results.best_accommodations} showMultiple={true} />;
 };
 
+// Attraction results component
+const AttractionResultsContent: React.FC<{ results: ResultData }> = ({ results }) => {
+  // Type guard for attraction results
+  if (!('attractions' in results)) {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <p className="text-gray-600">No attraction results available.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const attractionResults = results as { attractions: AttractionResult[]; recommendation?: string };
+  
+  return (
+    <Card>
+      <CardContent className="p-4">
+        {attractionResults.recommendation && (
+          <p className="text-gray-600 mb-4">{attractionResults.recommendation}</p>
+        )}
+        
+        {attractionResults.attractions && attractionResults.attractions.length > 0 && (
+          <div className="space-y-3">
+            <h4 className="font-medium">Popular Attractions</h4>
+            {attractionResults.attractions.slice(0, 5).map((attraction: AttractionResult, index: number) => (
+              <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div><strong>Name:</strong> {attraction.name}</div>
+                  <div><strong>Rating:</strong> {attraction.rating || 'N/A'}</div>
+                  <div><strong>Visit Duration:</strong> {attraction.visit_duration_estimate ? `${attraction.visit_duration_estimate} min` : 'N/A'}</div>
+                  <div><strong>Open Now:</strong> {attraction.opening_hours?.open_now ? 'Yes' : 'No'}</div>
+                  <div className="col-span-2"><strong>Address:</strong> {attraction.formatted_address}</div>
+                  {attraction.website && (
+                    <div className="col-span-2">
+                      <strong>Website:</strong>{' '}
+                      <a 
+                        href={attraction.website} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        Visit website
+                      </a>
+                    </div>
+                  )}
+                </div>
+                {attraction.place_id && (
+                  <div className="mt-3 pt-2 border-t border-gray-200">
+                    <a
+                      href={getGoogleMapsUrl(attraction.place_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
+                    >
+                      <MapPin className="w-4 h-4 mr-1" />
+                      View on Google Maps
+                      <ExternalLink className="w-3 h-3 ml-1" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
 // Restaurant results component
 const RestaurantResultsContent: React.FC<{ results: ResultData }> = ({ results }) => {
   // Type guard for restaurant results
@@ -202,11 +287,9 @@ const RestaurantResultsContent: React.FC<{ results: ResultData }> = ({ results }
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="flex items-center space-x-2 mb-4">
-          <UtensilsCrossed className="w-5 h-5 text-orange-600" />
-          <h3 className="font-semibold">Restaurant Results</h3>
-        </div>
-        <p className="text-gray-600 mb-4">{restaurantResults.recommendation}</p>
+        {restaurantResults.recommendation && (
+          <p className="text-gray-600 mb-4">{restaurantResults.recommendation}</p>
+        )}
         
         {restaurantResults.restaurants && restaurantResults.restaurants.length > 0 && (
           <div className="space-y-3">
@@ -220,6 +303,20 @@ const RestaurantResultsContent: React.FC<{ results: ResultData }> = ({ results }
                   <div><strong>Open Now:</strong> {restaurant.is_open_now ? 'Yes' : 'No'}</div>
                   <div className="col-span-2"><strong>Address:</strong> {restaurant.address}</div>
                 </div>
+                {restaurant.place_id && (
+                  <div className="mt-3 pt-2 border-t border-gray-200">
+                    <a
+                      href={getGoogleMapsUrl(restaurant.place_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
+                    >
+                      <MapPin className="w-4 h-4 mr-1" />
+                      View on Google Maps
+                      <ExternalLink className="w-3 h-3 ml-1" />
+                    </a>
+                  </div>
+                )}
               </div>
             ))}
           </div>
