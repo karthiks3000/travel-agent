@@ -75,8 +75,8 @@ class AgentCoreClientImpl implements AgentCoreClient {
       try {
         const response = await fetch(url, {
           ...options,
-          // Add timeout
-          signal: AbortSignal.timeout(300000), // 5 minute timeout for browser automation
+          // Add timeout - increased for multi-step travel planning with browser automation
+          signal: AbortSignal.timeout(720000), // 12 minute timeout (under AgentCore's 15min limit)
         });
 
         if (!response.ok) {
@@ -144,53 +144,16 @@ class AgentCoreClientImpl implements AgentCoreClient {
       flight_results: data.flight_results as any,
       accommodation_results: data.accommodation_results as any,
       restaurant_results: data.restaurant_results as any,
-      comprehensive_plan: data.comprehensive_plan as any,
+      itinerary: data.itinerary as import('../types/chat').TravelItinerary,
       
       // Additional metadata
       processing_time_seconds: data.processing_time_seconds as number,
       estimated_costs: data.estimated_costs as Record<string, number>,
       recommendations: data.recommendations as Record<string, unknown>,
-      session_metadata: data.session_metadata as Record<string, string>,
-      
-      // Legacy fields for backward compatibility
-      resultType: this.mapResponseTypeToResultType(data.response_type as string),
-      resultData: this.extractResultData(data),
-      metadata: data
+      session_metadata: data.session_metadata as Record<string, string>
     };
   }
   
-  /**
-   * Map response_type to legacy resultType for backward compatibility
-   */
-  private mapResponseTypeToResultType(responseType: string): 'flights' | 'accommodations' | 'restaurants' | 'itinerary' | undefined {
-    switch (responseType) {
-      case 'flights':
-      case 'accommodations': 
-      case 'restaurants':
-      case 'itinerary':
-        return responseType;
-      default:
-        return undefined;
-    }
-  }
-  
-  /**
-   * Extract result data based on response type for backward compatibility
-   */
-  private extractResultData(data: Record<string, unknown>): any {
-    switch (data.response_type) {
-      case 'flights':
-        return data.flight_results;
-      case 'accommodations':
-        return data.accommodation_results;
-      case 'restaurants':
-        return data.restaurant_results;
-      case 'itinerary':
-        return data.comprehensive_plan;
-      default:
-        return undefined;
-    }
-  }
 
   /**
    * Sleep utility for retry delays

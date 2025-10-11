@@ -248,35 +248,13 @@ export interface TravelItinerary {
   last_updated: string;
 }
 
-// Legacy itinerary interface for backward compatibility
-export interface ItineraryItem {
-  id: string;
-  type: 'flight' | 'accommodation' | 'restaurant' | 'activity';
-  date: string;
-  time?: string;
-  title: string;
-  description: string;
-  location?: string;
-  details: FlightResult | PropertyResult | RestaurantResult | Record<string, unknown>;
-}
-
-export interface ItineraryData extends BaseResultData {
-  type: 'itinerary';
-  tripId: string;
-  destination: string;
-  startDate: string;
-  endDate: string;
-  travelers: number;
-  items: ItineraryItem[];
-}
-
 // Union type for all result data
 export type ResultData = 
   | FlightSearchResults 
   | AccommodationSearchResults 
   | RestaurantSearchResults
   | AttractionSearchResults 
-  | ItineraryData;
+  | (TravelItinerary & BaseResultData);
 
 // Chat session interface
 export interface ChatSession {
@@ -351,7 +329,7 @@ export interface AgentCoreResponse {
   success: boolean;
   error?: string;
   
-  // New orchestrator response fields
+  // Orchestrator response fields
   response_type: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'itinerary';
   response_status: ResponseStatus;
   overall_progress_message: string;
@@ -361,22 +339,17 @@ export interface AgentCoreResponse {
   // Tool progress tracking
   tool_progress: ToolProgress[];
   
-  // Structured results from specialist agents (arrays of results)
+  // Structured results from specialist agents
   flight_results?: FlightResult[];
   accommodation_results?: PropertyResult[];
   restaurant_results?: RestaurantResult[];
-  comprehensive_plan?: ItineraryData;
+  itinerary?: TravelItinerary;
   
   // Additional metadata
   processing_time_seconds?: number;
   estimated_costs?: Record<string, number>;
   recommendations?: Record<string, unknown>;
   session_metadata?: Record<string, string>;
-  
-  // Legacy fields for backward compatibility
-  resultType?: ResultType;
-  resultData?: ResultData;
-  metadata?: Record<string, unknown>;
 }
 
 // AgentCore client interface

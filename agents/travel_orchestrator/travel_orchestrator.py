@@ -9,6 +9,7 @@ from typing import List, Optional
 import boto3
 import logging
 from strands import Agent, tool
+from strands.models.bedrock import BedrockModel
 from strands.hooks import HookRegistry
 from strands.tools.mcp.mcp_client import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
@@ -127,8 +128,16 @@ class TravelOrchestratorAgent(Agent):
             "agent_type": "travel_orchestrator"
         }
         
+        # Configure model with increased max_tokens to prevent truncation
+        model = BedrockModel(
+            model_id="us.amazon.nova-premier-v1:0",
+            max_tokens=10000,  # Increased from default ~4096 to handle large JSON responses
+            temperature=0.7,
+            top_p=0.9
+        )
+        
         super().__init__(
-            model="us.amazon.nova-premier-v1:0",
+            model=model,
             tools=all_tools,
             system_prompt=self._build_system_prompt(current_datetime, current_date),
             hooks=[memory_hooks] if memory_hooks else [],

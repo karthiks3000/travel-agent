@@ -146,8 +146,12 @@ export const useChatStore = create<ChatStore>()(
               break;
             case "itinerary":
               resultType = "itinerary";
-              if (response.comprehensive_plan) {
-                resultData = response.comprehensive_plan;
+              if (response.itinerary) {
+                resultData = {
+                  type: "itinerary" as const,
+                  timestamp: new Date(),
+                  ...response.itinerary
+                };
               }
               break;
             default:
@@ -173,14 +177,6 @@ export const useChatStore = create<ChatStore>()(
 
         // Update state with final response and clear streaming
         const currentMessages = get().messages;
-        
-        // Debug logging
-        console.log('🔍 Setting results in store:', {
-          resultType,
-          resultData,
-          responseType: response.response_type,
-          responseStatus: response.response_status
-        });
         
         set({
           messages: [...currentMessages, agentMessage],

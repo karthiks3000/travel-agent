@@ -3,6 +3,8 @@ Memory hooks for AgentCore short-term memory integration
 """
 import logging
 import uuid
+import json
+import re
 from typing import List, Dict, Any
 from datetime import datetime
 
@@ -14,7 +16,7 @@ logger = logging.getLogger("travel-orchestrator-memory")
 
 class TravelMemoryHook(HookProvider):
     """
-    Memory hook for travel orchestrator agent that handles short-term conversation memory
+    Simplified memory hook that stores all meaningful messages including tool results
     """
     
     def __init__(self, memory_client: MemoryClient, memory_id: str):
@@ -27,14 +29,11 @@ class TravelMemoryHook(HookProvider):
         """
         self.memory_client = memory_client
         self.memory_id = memory_id
-        logger.info(f"Initialized TravelMemoryHook with memory_id: {memory_id}")
+        logger.info(f"✅ Initialized TravelMemoryHook with memory_id: {memory_id}")
     
     def on_agent_initialized(self, event: AgentInitializedEvent):
         """
         Load recent conversation history when agent starts
-        
-        This hook runs when an agent is initialized and loads the last few
-        conversation turns to provide context for the current interaction.
         """
         try:
             # Get session info from agent state
@@ -47,51 +46,45 @@ class TravelMemoryHook(HookProvider):
             
             logger.info(f"Loading conversation history for actor_id: {actor_id}, session_id: {session_id}")
             
-            # Get fewer turns to reduce context contamination
+            # Get recent conversation turns
             recent_turns = self.memory_client.get_last_k_turns(
                 memory_id=self.memory_id,
                 actor_id=actor_id,
                 session_id=session_id,
-                k=6,  # Reduced from 10 to 6 turns (3 conversations max)
+                k=6,  # Last 6 turns (3 conversations)
                 branch_name="main"
             )
             
             if recent_turns:
-                # Format conversation history for context, filtering successful interactions only
+                # Format conversation history for context
                 context_messages = []
                 for turn in recent_turns:
                     for message in turn:
                         role = message['role'].lower()
                         content = message['content']['text']
-                        
-                        # Filter out failed searches and error messages
-                        if not any(keyword in content.lower() for keyword in [
-                            'validation error', 'tool error', 'missing required',
-                            'need more information', 'i need', 'failed', 'error occurred',
-                            'please provide', 'system error'
-                        ]):
-                            context_messages.append(f"{role.title()}: {content}")
+                        context_messages.append(f"{role.title()}: {content}")
                 
-                # Only keep last 6 clean messages to avoid overwhelming context
-                filtered_messages = context_messages[-6:]
-                
-                if filtered_messages:
+                if context_messages:
                     # Create formatted context
-                    context = "\n".join(filtered_messages)
-                    logger.info(f"Context from memory (filtered): {context[:200]}...")  # Log first 200 chars
+                    context = "\n".join(context_messages[-6:])  # Keep last 6 messages
+                    logger.info(f"Context from memory (filtered): {context[:200]}...")
                     
                     # Add context to agent's system prompt
                     conversation_context = f"""
 
-PREVIOUS CONVERSATION CONTEXT (successful interactions only):
+PREVIOUS CONVERSATION CONTEXT:
 {context}
 
 Continue the conversation naturally based on this context. Reference previous discussions when relevant."""
                     
-                    event.agent.system_prompt += conversation_context
-                    logger.info(f"✅ Loaded {len(filtered_messages)} clean conversation messages")
+                    # Handle case where system_prompt might be None
+                    if event.agent.system_prompt is None:
+                        event.agent.system_prompt = conversation_context
+                    else:
+                        event.agent.system_prompt += conversation_context
+                    logger.info(f"✅ Loaded {len(context_messages)} conversation messages")
                 else:
-                    logger.info("✨ No clean conversation context found - starting fresh")
+                    logger.info("✨ No conversation context found - starting fresh")
             else:
                 logger.info("No previous conversation history found - this is a new conversation")
                 
@@ -101,10 +94,7 @@ Continue the conversation naturally based on this context. Reference previous di
     
     def on_message_added(self, event: MessageAddedEvent):
         """
-        Store only conversational messages in memory, filtering out tool results
-        
-        This hook runs after the agent processes a message and stores ONLY
-        the actual conversation between user and assistant, not tool execution metadata.
+        Store all meaningful messages in memory (including tool results)
         """
         try:
             messages = event.agent.messages
@@ -113,219 +103,115 @@ Continue the conversation naturally based on this context. Reference previous di
             actor_id = event.agent.state.get("actor_id")
             session_id = event.agent.state.get("session_id")
             
-            if not actor_id or not session_id:
-                logger.warning("Missing actor_id or session_id in agent state")
+            if not actor_id or not session_id or not messages:
+                logger.warning("Missing required info for memory storage")
                 return
             
-            # Get the latest message to store
-            if messages and len(messages) > 0:
-                latest_message = messages[-1]
-                
-                # FILTER: Only store conversational messages, not tool results
-                if not self._is_conversational_message(latest_message):
-                    logger.info("🔇 Skipping tool result storage - only storing conversational messages")
+            latest_message = messages[-1]
+            role = latest_message.get("role", "")
+            content = latest_message.get("content", "")
+            
+            # Always store user messages
+            if role == "user":
+                self._store_message(actor_id, session_id, content, role)
+                return
+            
+            # For assistant messages, store if meaningful
+            if role == "assistant":
+                # Skip if only thinking (no actual content)
+                if self._is_thinking_only(content):
+                    logger.info("🔇 Skipping thinking-only message")
                     return
                 
-                # Extract conversational content only
-                conversational_content = self._extract_conversational_content(latest_message)
+                # Store everything else (tool results, final responses, questions)
+                self._store_message(actor_id, session_id, content, role)
                 
-                if conversational_content:
-                    role = latest_message.get("role", "assistant")
+        except Exception as e:
+            logger.error(f"Failed to store message: {e}")
+    
+    def _is_thinking_only(self, content: Any) -> bool:
+        """
+        Check if message contains only thinking blocks with no meaningful content
+        
+        Args:
+            content: Message content
+            
+        Returns:
+            True if message is thinking-only, False otherwise
+        """
+        try:
+            # Convert to string for analysis
+            content_str = json.dumps(content) if isinstance(content, (dict, list)) else str(content)
+            
+            # Check if contains thinking blocks
+            if "<thinking>" in content_str and "</thinking>" in content_str:
+                # Remove thinking blocks and see what's left
+                thinking_removed = re.sub(r'<thinking>.*?</thinking>', '', content_str, flags=re.DOTALL).strip()
+                
+                # If nothing meaningful left, it's thinking-only
+                if not thinking_removed or thinking_removed in ["[]", "{}", '""', "null"]:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking thinking-only content: {e}")
+            return False
+    
+    def _store_message(self, actor_id: str, session_id: str, content: Any, role: str):
+        """
+        Store message in memory with proper size handling
+        
+        Args:
+            actor_id: Actor identifier
+            session_id: Session identifier  
+            content: Message content
+            role: Message role (user/assistant)
+        """
+        try:
+            # Convert content to string for storage
+            if isinstance(content, (dict, list)):
+                content_str = json.dumps(content)
+            else:
+                content_str = str(content)
+            
+            # Check byte size (9KB limit per message)
+            content_bytes = content_str.encode('utf-8')
+            
+            # Convert role to valid AgentCore Memory format
+            valid_role = role.upper() if role.lower() in ['user', 'assistant'] else 'OTHER'
+            
+            if len(content_bytes) <= 9000:  # 9KB limit with buffer
+                # Store as single message
+                self.memory_client.create_event(
+                    memory_id=self.memory_id,
+                    actor_id=actor_id,
+                    session_id=session_id,
+                    messages=[(content_str, valid_role)]
+                )
+                logger.info(f"✅ Stored {role} message ({len(content_bytes)} bytes)")
+                
+            else:
+                # Split into chunks and store as separate events
+                chunk_size = 8500  # Leave buffer for safety
+                chunk_count = 0
+                
+                for i in range(0, len(content_str), chunk_size):
+                    chunk = content_str[i:i + chunk_size]
+                    chunk_count += 1
                     
-                    # Truncate message if too long for memory storage (9000 char limit)
-                    truncated_content = self._truncate_message(conversational_content, max_length=8000)
-                    
-                    # Store in memory
+                    # Store each chunk as a separate event with valid role
                     self.memory_client.create_event(
                         memory_id=self.memory_id,
                         actor_id=actor_id,
                         session_id=session_id,
-                        messages=[(truncated_content, role)]
+                        messages=[(chunk, valid_role)]
                     )
-                    
-                    truncation_note = " [TRUNCATED]" if len(conversational_content) > 8000 else ""
-                    logger.info(f"✅ Stored conversational message: {truncated_content[:100]}...{truncation_note}")
-                else:
-                    logger.info("🔇 No conversational content found in message")
-            
+                
+                logger.info(f"✅ Stored {role} message in {chunk_count} separate events ({len(content_bytes)} bytes total)")
+                
         except Exception as e:
-            logger.error(f"Failed to store message: {e}")
-            # Continue without storing rather than failing
-    
-    def _is_conversational_message(self, message: Dict[str, Any]) -> bool:
-        """
-        Check if a message is conversational (user/assistant) vs tool result
-        
-        Args:
-            message: Message from agent.messages
-            
-        Returns:
-            True if message should be stored in memory, False for tool results
-        """
-        try:
-            role = message.get("role", "").lower()
-            
-            # Always store user messages
-            if role == "user":
-                return True
-            
-            # For assistant messages, check if it's a final response vs tool result
-            if role == "assistant":
-                content = message.get("content", "")
-                content_str = str(content).lower()
-                
-                # Skip validation errors and tool failures that contaminate context
-                if any(error_keyword in content_str for error_keyword in [
-                    'validation_error', 'missing required', 'need more information',
-                    'system_error', 'tool_error', 'failed to', 'error occurred',
-                    'i need more information', 'please provide'
-                ]):
-                    logger.info("🔇 Skipping error/validation message")
-                    return False
-                
-                # Skip tool results (they contain toolResult, toolUseId, etc.)
-                if isinstance(content, dict) and any(key in str(content).lower() for key in 
-                    ["toolresult", "tooluseid", "tooluse", "tool_use_id"]):
-                    logger.info("🔇 Skipping tool result message")
-                    return False
-                
-                # Skip if content is a list with tool metadata
-                if isinstance(content, list):
-                    for item in content:
-                        if isinstance(item, dict) and any(key in str(item).lower() for key in 
-                            ["toolresult", "tooluseid", "tooluse", "tool_use_id"]):
-                            logger.info("🔇 Skipping tool metadata message")
-                            return False
-                
-                # Store if it looks like a conversational response
-                if isinstance(content, str) and len(content.strip()) > 0:
-                    return True
-                
-                # Store if it's a list with text content
-                if isinstance(content, list):
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item and len(item["text"].strip()) > 0:
-                            return True
-            
-            logger.info(f"🔇 Message not identified as conversational: role={role}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error checking if message is conversational: {e}")
-            return False  # Default to not storing if unsure
-    
-    def _extract_conversational_content(self, message: Dict[str, Any]) -> str:
-        """
-        Extract only the conversational text content from a message
-        
-        Args:
-            message: Message from agent.messages
-            
-        Returns:
-            Clean conversational text content
-        """
-        try:
-            content = message.get("content", "")
-            
-            # Handle string content directly
-            if isinstance(content, str):
-                clean_content = self._clean_content_for_storage(content)
-                return clean_content
-            
-            # Handle list content - extract text fields
-            if isinstance(content, list):
-                text_parts = []
-                for item in content:
-                    if isinstance(item, dict):
-                        # Look for text field
-                        if "text" in item:
-                            text_parts.append(item["text"])
-                        # Skip tool-related fields
-                        elif not any(key in str(item).lower() for key in 
-                            ["toolresult", "tooluseid", "tooluse", "tool_use_id"]):
-                            # Include other text content
-                            text_parts.append(str(item))
-                
-                combined_content = "\n".join(text_parts).strip()
-                return self._clean_content_for_storage(combined_content)
-            
-            # Handle dict content
-            if isinstance(content, dict):
-                if "text" in content:
-                    clean_content = self._clean_content_for_storage(content["text"].strip())
-                    return clean_content
-                elif not any(key in str(content).lower() for key in 
-                    ["toolresult", "tooluseid", "tooluse", "tool_use_id"]):
-                    clean_content = self._clean_content_for_storage(str(content).strip())
-                    return clean_content
-            
-            return ""
-            
-        except Exception as e:
-            logger.error(f"Error extracting conversational content: {e}")
-            return ""
-    
-    def _clean_content_for_storage(self, content: str) -> str:
-        """
-        Clean content for memory storage by removing thinking blocks, JSON responses, etc.
-        
-        Args:
-            content: Raw content string
-            
-        Returns:
-            Clean conversational content suitable for memory storage
-        """
-        import re
-        import json
-        
-        # Remove thinking blocks completely
-        cleaned = re.sub(r'<thinking>.*?</thinking>', '', content, flags=re.DOTALL).strip()
-        
-        # If it's a JSON response, try to extract just the message field
-        if cleaned.startswith('{') and cleaned.endswith('}'):
-            try:
-                json_data = json.loads(cleaned)
-                if 'message' in json_data:
-                    # Use the message field instead of the full JSON
-                    cleaned = json_data['message']
-                    logger.info("📝 Extracted message field from JSON response for storage")
-            except json.JSONDecodeError:
-                # If JSON parsing fails, keep the original cleaned content
-                pass
-        
-        # Remove extra whitespace and normalize
-        cleaned = re.sub(r'\n\s*\n', '\n', cleaned).strip()
-        
-        return cleaned
-    
-    def _truncate_message(self, content: str, max_length: int = 8000) -> str:
-        """
-        Truncate message to fit AgentCore Memory limits while preserving key information
-        
-        Args:
-            content: Original message content
-            max_length: Maximum allowed length (default 8000 to stay under 9000 limit)
-            
-        Returns:
-            Truncated message content
-        """
-        if len(content) <= max_length:
-            return content
-        
-        # Keep first part and add truncation notice
-        truncated = content[:max_length-100]
-        
-        # Try to end at a natural break point (sentence, paragraph, or line)
-        for break_char in ['\n\n', '\n', '. ', '! ', '? ']:
-            last_break = truncated.rfind(break_char)
-            if last_break > max_length * 0.8:  # Only use break if it's not too early
-                truncated = truncated[:last_break + len(break_char)]
-                break
-        
-        truncated += "\n\n[Message truncated for memory storage - full content available in current conversation]"
-        
-        logger.info(f"📝 Truncated message from {len(content)} to {len(truncated)} characters")
-        return truncated
+            logger.error(f"Failed to store message in memory: {e}")
     
     def register_hooks(self, registry: HookRegistry) -> None:
         """
@@ -339,7 +225,7 @@ Continue the conversation naturally based on this context. Reference previous di
         logger.info("✅ Registered memory hooks: MessageAddedEvent, AgentInitializedEvent")
 
 
-def create_shared_memory(region: str = "us-east-1", memory_name: str = None) -> str:
+def create_shared_memory(region: str = "us-east-1", memory_name: str | None = None) -> str:
     """
     Create a shared memory resource for the travel planning system
     
@@ -365,7 +251,7 @@ def create_shared_memory(region: str = "us-east-1", memory_name: str = None) -> 
             strategies=[],  # No special memory strategies for short-term memory
             event_expiry_days=7,  # Memories expire after 7 days
             max_wait=300,  # Maximum time to wait for memory creation (5 minutes)
-            poll_interval=10  # Check status every 10 seconds
+            poll_interval=600  # Check status every 60 seconds
         )
         
         memory_id = memory['id']
@@ -377,12 +263,12 @@ def create_shared_memory(region: str = "us-east-1", memory_name: str = None) -> 
         raise e
 
 
-def generate_session_ids() -> Dict[str, str]:
+def generate_session_ids() -> str:
     """
-    Generate consistent session and actor IDs for the travel planning system
+    Generate session ID for the travel planning system
         
     Returns:
-        session_id
+        session_id string
     """
     conversation_start = datetime.now()
     

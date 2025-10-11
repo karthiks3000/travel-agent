@@ -8,8 +8,9 @@ import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { useChatResults } from '@/stores/chatStore';
 import { BarChart3, Plane, Building, UtensilsCrossed, MapPin, AlertCircle } from 'lucide-react';
-import type { ResultData, FlightSearchResults, AccommodationSearchResults } from '@/types/chat';
+import type { ResultData, FlightSearchResults, AccommodationSearchResults, TravelItinerary, RestaurantResult } from '@/types/chat';
 import { FlightOptions, AccommodationOptions } from '@/components/travel/ComponentResults';
+import { ItineraryTimeline } from '@/components/travel/ItineraryTimeline';
 
 interface ResultsPanelProps {
   className?: string;
@@ -17,17 +18,6 @@ interface ResultsPanelProps {
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({ className }) => {
   const { currentResults, resultType } = useChatResults();
-
-  // Debug logging
-  React.useEffect(() => {
-    console.log('🎯 ResultsPanel received:', {
-      currentResults,
-      resultType,
-      hasResults: !!currentResults,
-      resultsType: typeof currentResults,
-      resultsKeys: currentResults ? Object.keys(currentResults) : null
-    });
-  }, [currentResults, resultType]);
 
   const getResultIcon = (type: string) => {
     switch (type) {
@@ -152,9 +142,9 @@ interface ResultsContentProps {
 const ResultsContent: React.FC<ResultsContentProps> = ({ results }) => {
   switch (results.type) {
     case 'flights':
-      return <FlightResultsContent results={results} />;
+      return <FlightResultsContent results={results as FlightSearchResults} />;
     case 'accommodations':
-      return <AccommodationResultsContent results={results} />;
+      return <AccommodationResultsContent results={results as AccommodationSearchResults} />;
     case 'restaurants':
       return <RestaurantResultsContent results={results} />;
     case 'itinerary':
@@ -194,86 +184,87 @@ const AccommodationResultsContent: React.FC<{ results: AccommodationSearchResult
   return <AccommodationOptions accommodations={results.best_accommodations} showMultiple={true} />;
 };
 
-const RestaurantResultsContent: React.FC<{ results: any }> = ({ results }) => (
-  <Card>
-    <CardContent className="p-4">
-      <div className="flex items-center space-x-2 mb-4">
-        <UtensilsCrossed className="w-5 h-5 text-orange-600" />
-        <h3 className="font-semibold">Restaurant Results</h3>
-      </div>
-      <p className="text-gray-600 mb-4">{results.recommendation}</p>
-      
-      {results.restaurants && results.restaurants.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="font-medium">Recommended Restaurants</h4>
-          {results.restaurants.slice(0, 3).map((restaurant: any, index: number) => (
-            <div key={index} className="bg-gray-50 p-3 rounded-lg">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><strong>Name:</strong> {restaurant.name}</div>
-                <div><strong>Rating:</strong> {restaurant.rating || 'N/A'}</div>
-                <div><strong>Price Level:</strong> {restaurant.price_level || 'N/A'}</div>
-                <div><strong>Open Now:</strong> {restaurant.is_open_now ? 'Yes' : 'No'}</div>
-                <div className="col-span-2"><strong>Address:</strong> {restaurant.address}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </CardContent>
-  </Card>
-);
+// Restaurant results component
+const RestaurantResultsContent: React.FC<{ results: ResultData }> = ({ results }) => {
+  // Type guard for restaurant results
+  if (!('restaurants' in results)) {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <p className="text-gray-600">No restaurant results available.</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
-const ItineraryResultsContent: React.FC<{ results: any }> = ({ results }) => (
-  <Card>
-    <CardContent className="p-4">
-      <div className="flex items-center space-x-2 mb-4">
-        <MapPin className="w-5 h-5 text-purple-600" />
-        <h3 className="font-semibold">Trip Itinerary</h3>
-      </div>
-      
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div><strong>Destination:</strong> {results.destination}</div>
-          <div><strong>Travelers:</strong> {results.travelers}</div>
-          <div><strong>Start Date:</strong> {results.startDate}</div>
-          <div><strong>End Date:</strong> {results.endDate}</div>
+  const restaurantResults = results as { restaurants: RestaurantResult[]; recommendation?: string };
+  
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center space-x-2 mb-4">
+          <UtensilsCrossed className="w-5 h-5 text-orange-600" />
+          <h3 className="font-semibold">Restaurant Results</h3>
         </div>
+        <p className="text-gray-600 mb-4">{restaurantResults.recommendation}</p>
         
-        {results.items && results.items.length > 0 && (
-          <div className="mt-4">
-            <h4 className="font-medium mb-3">Itinerary Items</h4>
-            <div className="space-y-2">
-              {results.items.map((item: any, index: number) => (
-                <div key={index} className="bg-gray-50 p-3 rounded-lg">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                      {item.type}
-                    </span>
-                    <span className="text-sm font-medium">{item.title}</span>
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    <div><strong>Date:</strong> {item.date} {item.time && `at ${item.time}`}</div>
-                    <div><strong>Description:</strong> {item.description}</div>
-                    {item.location && <div><strong>Location:</strong> {item.location}</div>}
-                  </div>
+        {restaurantResults.restaurants && restaurantResults.restaurants.length > 0 && (
+          <div className="space-y-3">
+            <h4 className="font-medium">Recommended Restaurants</h4>
+            {restaurantResults.restaurants.slice(0, 3).map((restaurant: RestaurantResult, index: number) => (
+              <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div><strong>Name:</strong> {restaurant.name}</div>
+                  <div><strong>Rating:</strong> {restaurant.rating || 'N/A'}</div>
+                  <div><strong>Price Level:</strong> {restaurant.price_level || 'N/A'}</div>
+                  <div><strong>Open Now:</strong> {restaurant.is_open_now ? 'Yes' : 'No'}</div>
+                  <div className="col-span-2"><strong>Address:</strong> {restaurant.address}</div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         )}
-      </div>
-    </CardContent>
-  </Card>
-);
+      </CardContent>
+    </Card>
+  );
+};
 
-const GenericResultsContent: React.FC<{ results: any }> = ({ results }) => (
+// Itinerary results component - handles TravelItinerary format
+const ItineraryResultsContent: React.FC<{ results: ResultData }> = ({ results }) => {
+  // Check if it's the TravelItinerary format
+  if ('trip_title' in results && 'daily_itineraries' in results) {
+    const travelItinerary = results as TravelItinerary & { type: 'itinerary'; timestamp: Date };
+    
+    // Add missing fields for ItineraryTimeline component
+    const itineraryWithDefaults: TravelItinerary = {
+      ...travelItinerary,
+      trip_summary: travelItinerary.trip_summary || 'Your travel itinerary',
+      created_at: travelItinerary.created_at || new Date().toISOString(),
+      last_updated: travelItinerary.last_updated || new Date().toISOString(),
+    };
+    
+    return <ItineraryTimeline itinerary={itineraryWithDefaults} />;
+  }
+  
+  // No itinerary data available
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-gray-600">No itinerary data available.</p>
+      </CardContent>
+    </Card>
+  );
+};
+
+// Generic results fallback component
+const GenericResultsContent: React.FC<{ results: ResultData }> = ({ results }) => (
   <Card>
     <CardContent className="p-4">
       <div className="flex items-center space-x-2 mb-4">
         <AlertCircle className="w-5 h-5 text-gray-600" />
         <h3 className="font-semibold">Results</h3>
       </div>
-      <p className="text-gray-600">{results.recommendation || 'Results received from travel assistant.'}</p>
+      <p className="text-gray-600">{'recommendation' in results ? results.recommendation : 'Results received from travel assistant.'}</p>
       
       <div className="mt-4 p-3 bg-gray-50 rounded-lg">
         <pre className="text-xs text-gray-700 whitespace-pre-wrap">
