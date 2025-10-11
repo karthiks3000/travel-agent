@@ -364,7 +364,7 @@ export interface AgentCoreResponse {
   // Structured results from specialist agents (arrays of results)
   flight_results?: FlightResult[];
   accommodation_results?: PropertyResult[];
-  restaurant_results?: RestaurantSearchResults;
+  restaurant_results?: RestaurantResult[];
   comprehensive_plan?: ItineraryData;
   
   // Additional metadata

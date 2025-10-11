@@ -94,6 +94,9 @@ class TravelOrchestratorAgent(Agent):
         # Initialize Nova Act API key as environment variable for tools
         self._initialize_nova_act_api_key()
         
+        # Initialize Amadeus API credentials as environment variables for tools
+        self._initialize_amadeus_credentials()
+        
         # Initialize memory if enabled
         memory_hooks = None
         if memory_id:
@@ -113,8 +116,6 @@ class TravelOrchestratorAgent(Agent):
             [
                 self.search_flights,
                 self.search_accommodations,
-                self.search_restaurants,
-                self.search_attractions,
             ]
             + gateway_tools  # Add Google Maps tools from Gateway
         )
@@ -242,6 +243,48 @@ class TravelOrchestratorAgent(Agent):
         except Exception as e:
             logger.error(f"❌ Failed to initialize Nova Act API key: {e}")
     
+    def _initialize_amadeus_credentials(self):
+        """
+        Initialize Amadeus API credentials as environment variables for tools to use
+        
+        Fetches from Parameter Store or existing environment variables and sets 
+        AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET, AMADEUS_HOSTNAME environment variables
+        for the flight search tool to access
+        """
+        try:
+            # Check if already set in environment
+            existing_client_id = os.getenv('AMADEUS_CLIENT_ID')
+            existing_client_secret = os.getenv('AMADEUS_CLIENT_SECRET')
+            
+            if existing_client_id and existing_client_secret:
+                logger.info("✅ Amadeus API credentials already available in environment")
+                return
+            
+            # Try to get from Parameter Store first
+            try:
+                amadeus_client_id = get_parameter('/travel-agent/amadeus-client-id')
+                amadeus_client_secret = get_parameter('/travel-agent/amadeus-client-secret')
+                amadeus_hostname = get_parameter('/travel-agent/amadeus-hostname')
+                
+                if amadeus_client_id and amadeus_client_secret:
+                    os.environ['AMADEUS_CLIENT_ID'] = amadeus_client_id
+                    os.environ['AMADEUS_CLIENT_SECRET'] = amadeus_client_secret
+                    os.environ['AMADEUS_HOSTNAME'] = amadeus_hostname or 'test'  # Default to 'test'
+                    logger.info("✅ Amadeus API credentials loaded from Parameter Store and set in environment")
+                    logger.info(f"✅ Using Amadeus hostname: {amadeus_hostname or 'test'}")
+                    return
+                else:
+                    logger.warning("⚠️  Incomplete Amadeus credentials found in Parameter Store")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️  Could not retrieve Amadeus credentials from Parameter Store: {e}")
+            
+            # Log warning if no credentials available
+            logger.warning("⚠️  Amadeus API credentials not available - flight search tools may fail")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Amadeus API credentials: {e}")
+    
     def _validate_flight_params(self, origin: str, destination: str, departure_date: str, 
                                return_date: Optional[str] = None, passengers: int = 1) -> List[str]:
         """
@@ -332,20 +375,6 @@ class TravelOrchestratorAgent(Agent):
         
         return missing_params
     
-    def _validate_restaurant_params(self, destination: str) -> List[str]:
-        """
-        Validate restaurant search parameters
-        
-        Returns:
-            List of error messages (empty if all parameters are valid)
-        """
-        missing_params = []
-        
-        # Required parameters
-        if not destination or destination.strip() == "":
-            missing_params.append("destination")
-        
-        return missing_params
 
     def _build_system_prompt(self, current_datetime: str, current_date: str) -> str:
         """Build enhanced system prompt for comprehensive travel orchestration with JSON response format"""
@@ -358,9 +387,11 @@ YOUR ROLE: Create comprehensive travel plans by coordinating flight searches, ac
 AVAILABLE TOOLS:
 - search_flights: Find flight options (returns multiple results based on request)
 - search_accommodations: Find accommodation options (returns multiple results based on request)  
-- searchPlacesByText: Google Places text search for restaurants and attractions
-- searchNearbyPlaces: Google Places nearby search for locations around specific points
-- getPlaceDetails: Get detailed information about specific places
+- searchPlacesByText: Google Places text search - USE THIS DIRECTLY for restaurants and attractions
+- searchNearbyPlaces: Google Places nearby search - USE THIS for locations around specific points  
+- getPlaceDetails: Get detailed information about specific places - USE THIS for place details
+
+**IMPORTANT: For restaurants and attractions, call the Google Places tools directly. Do NOT use wrapper functions.**
 
 REQUEST TYPE DETECTION - Listen carefully to what users want:
 
@@ -444,17 +475,27 @@ search_accommodations:
 - rooms: OPTIONAL - Defaults to 1, must be 1-8
 - platform_preference: OPTIONAL - "airbnb", "booking", or "both". use booking when user specifies hotels or resorts. use airbnb when user is looking for rentals. use both when the user hasnt specified a preference for type of accomodation
 
-search_restaurants:
-- destination: REQUIRED - Must be a city name
-- cuisine_type: OPTIONAL - Type of cuisine (e.g., "Italian", "seafood")
-- price_range: OPTIONAL - "budget", "moderate", "expensive", "luxury"
-- max_results: OPTIONAL - Defaults to 5, must be 1-10
+DIRECT GOOGLE PLACES API USAGE EXAMPLES:
 
-search_attractions:
-- destination: REQUIRED - Must be a city name
-- attraction_types: OPTIONAL - List of types (e.g., ["museum", "park"])
-- max_results: OPTIONAL - Defaults to 5, must be 1-10
+For "find vegan restaurants in Paris":
+1. Call searchPlacesByText with:
+   - query: "vegan restaurants in Paris"
+   - type: "restaurant" 
+   - maxResultCount: 5
+2. Wait for complete response
+3. Format results into TravelOrchestratorResponse
 
+
+For "find museums in Rome":
+1. Call searchPlacesByText with:
+   - query: "museums in Rome"
+   - type: "tourist_attraction"
+   - maxResultCount: 5
+2. Wait for complete response  
+3. Format results into TravelOrchestratorResponse
+
+
+**CRITICAL: Always wait for Google Places API responses before returning to user.**
 
 TOOL CALLING RULES:
 1. **ONLY call tools when you have ALL required parameters with valid values**
@@ -690,140 +731,6 @@ REMEMBER: Always respond in JSON using the following schema - {TravelOrchestrato
                 session_metadata=None
             )
 
-    @tool
-    def search_restaurants(self, destination: str, cuisine_type: Optional[str] = None, 
-                          price_range: Optional[str] = None, max_results: int = 5) -> TravelOrchestratorResponse:
-        """
-        Search for restaurants using Google Places API via MCP Gateway
-        
-        Args:
-            destination: Destination city or location (e.g., 'Paris', 'Manhattan, NYC')
-            cuisine_type: Type of cuisine (e.g., "Italian", "seafood", "vegetarian")
-            price_range: Price preference ("budget", "moderate", "expensive", "luxury")
-            max_results: Maximum number of results to return (1-10)
-        
-        Returns:
-            TravelOrchestratorResponse with restaurant results
-        """
-        # Validate parameters
-        validation_errors = self._validate_restaurant_params(destination)
-        
-        if validation_errors:
-            validation_progress = create_tool_progress("search_restaurants", {"destination": destination}, "failed")
-            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
-            
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.CONVERSATION,
-                response_status=ResponseStatus.VALIDATION_ERROR,
-                message=f"I need more information to search for restaurants. Missing: {', '.join(validation_errors)}",
-                overall_progress_message="Restaurant search needs more details",
-                is_final_response=False,
-                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
-                tool_progress=[validation_progress],
-                success=False,
-                error_message=f"Missing parameters: {', '.join(validation_errors)}",
-                processing_time_seconds=0,
-                flight_results=None,
-                accommodation_results=None,
-                restaurant_results=None,
-                attraction_results=None,
-                itinerary=None,
-                estimated_costs=None,
-                recommendations=None,
-                session_metadata=None
-            )
-        
-        print(f"🍽️ Restaurant search: {destination} | {cuisine_type or 'any cuisine'} | {price_range or 'any price'}")
-        
-        # This tool now lets the AI use Google Places API directly via MCP Gateway
-        # The AI should call searchPlacesByText or other Google Places tools directly
-        # and format the results into RestaurantResult objects
-        return TravelOrchestratorResponse(
-            response_type=ResponseType.CONVERSATION,
-            response_status=ResponseStatus.REQUESTING_INFO,
-            message=f"I'll search for {cuisine_type or 'any'} restaurants in {destination}. Let me use the Google Places API to find the best options for you.",
-            overall_progress_message="Ready to search for restaurants",
-            is_final_response=False,
-            success=True,
-            processing_time_seconds=0,
-            error_message=None,
-            next_expected_input_friendly=None,
-            flight_results=None,
-            accommodation_results=None,
-            restaurant_results=None,
-            attraction_results=None,
-            itinerary=None,
-            estimated_costs=None,
-            recommendations=None,
-            session_metadata=None
-        )
-
-    @tool
-    def search_attractions(self, destination: str, attraction_types: Optional[List[str]] = None, 
-                          max_results: int = 5) -> TravelOrchestratorResponse:
-        """
-        Search for attractions using Google Places API via MCP Gateway
-        
-        Args:
-            destination: Destination city or location (e.g., 'Paris', 'Manhattan, NYC')
-            attraction_types: Types of attractions (e.g., ["museum", "park", "monument"])
-            max_results: Maximum number of results to return (1-10)
-        
-        Returns:
-            TravelOrchestratorResponse with attraction results
-        """
-        # Validate parameters
-        validation_errors = self._validate_restaurant_params(destination)  # Same validation as restaurants
-        
-        if validation_errors:
-            validation_progress = create_tool_progress("search_attractions", {"destination": destination}, "failed")
-            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
-            
-            return TravelOrchestratorResponse(
-                response_type=ResponseType.CONVERSATION,
-                response_status=ResponseStatus.VALIDATION_ERROR,
-                message=f"I need more information to search for attractions. Missing: {', '.join(validation_errors)}",
-                overall_progress_message="Attraction search needs more details",
-                is_final_response=False,
-                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
-                tool_progress=[validation_progress],
-                success=False,
-                error_message=f"Missing parameters: {', '.join(validation_errors)}",
-                processing_time_seconds=0,
-                flight_results=None,
-                accommodation_results=None,
-                restaurant_results=None,
-                attraction_results=None,
-                itinerary=None,
-                estimated_costs=None,
-                recommendations=None,
-                session_metadata=None
-            )
-        
-        print(f"🏛️ Attraction search: {destination} | {attraction_types or 'all types'}")
-        
-        # This tool now lets the AI use Google Places API directly via MCP Gateway
-        # The AI should call searchPlacesByText or other Google Places tools directly
-        # and format the results into AttractionResult objects
-        return TravelOrchestratorResponse(
-            response_type=ResponseType.CONVERSATION,
-            response_status=ResponseStatus.REQUESTING_INFO,
-            message=f"I'll search for {', '.join(attraction_types) if attraction_types else 'popular'} attractions in {destination}. Let me use the Google Places API to find the best options for you.",
-            overall_progress_message="Ready to search for attractions",
-            is_final_response=False,
-            success=True,
-            processing_time_seconds=0,
-            error_message=None,
-            next_expected_input_friendly=None,
-            flight_results=None,
-            accommodation_results=None,
-            restaurant_results=None,
-            attraction_results=None,
-            itinerary=None,
-            estimated_costs=None,
-            recommendations=None,
-            session_metadata=None
-        )
 
 # Bedrock AgentCore integration
 app = BedrockAgentCoreApp()

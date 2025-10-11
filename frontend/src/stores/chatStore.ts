@@ -137,8 +137,9 @@ export const useChatStore = create<ChatStore>()(
               resultType = "restaurants";
               if (response.restaurant_results) {
                 resultData = {
-                  ...response.restaurant_results,
                   type: "restaurants" as const,
+                  restaurants: response.restaurant_results,
+                  total_results: response.restaurant_results.length,
                   timestamp: new Date()
                 };
               }

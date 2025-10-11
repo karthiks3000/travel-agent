@@ -120,6 +120,23 @@ if [[ -z "$NOVA_ACT_API_KEY" ]]; then
 fi
 print_status "Nova Act API key found in environment"
 
+# Check Amadeus API credentials
+if [[ -z "$AMADEUS_CLIENT_ID" ]]; then
+    print_error "AMADEUS_CLIENT_ID environment variable not set"
+    echo "Get your Amadeus API credentials from: https://developers.amadeus.com/"
+    echo "Set it with: export AMADEUS_CLIENT_ID='your_client_id_here'"
+    exit 1
+fi
+print_status "Amadeus Client ID found in environment"
+
+if [[ -z "$AMADEUS_CLIENT_SECRET" ]]; then
+    print_error "AMADEUS_CLIENT_SECRET environment variable not set"
+    echo "Get your Amadeus API credentials from: https://developers.amadeus.com/"
+    echo "Set it with: export AMADEUS_CLIENT_SECRET='your_client_secret_here'"
+    exit 1
+fi
+print_status "Amadeus Client Secret found in environment"
+
 # Step 1.5: Get Cognito Configuration from CDK Stack
 echo -e "\n${BLUE}Step 1.5: Retrieving Cognito Configuration${NC}"
 echo "---------------------------------------------------"
@@ -183,6 +200,47 @@ if aws ssm put-parameter \
     print_status "Nova Act API key stored in Parameter Store: $PARAMETER_NAME"
 else
     print_error "Failed to store API key in Parameter Store"
+    exit 1
+fi
+
+# Store Amadeus API credentials in Parameter Store
+if aws ssm put-parameter \
+    --name "/travel-agent/amadeus-client-id" \
+    --value "$AMADEUS_CLIENT_ID" \
+    --type "String" \
+    --overwrite \
+    --profile $AWS_PROFILE \
+    --region $REGION >/dev/null 2>&1; then
+    print_status "Amadeus Client ID stored in Parameter Store: /travel-agent/amadeus-client-id"
+else
+    print_error "Failed to store Amadeus Client ID in Parameter Store"
+    exit 1
+fi
+
+if aws ssm put-parameter \
+    --name "/travel-agent/amadeus-client-secret" \
+    --value "$AMADEUS_CLIENT_SECRET" \
+    --type "SecureString" \
+    --overwrite \
+    --profile $AWS_PROFILE \
+    --region $REGION >/dev/null 2>&1; then
+    print_status "Amadeus Client Secret stored in Parameter Store: /travel-agent/amadeus-client-secret"
+else
+    print_error "Failed to store Amadeus Client Secret in Parameter Store"
+    exit 1
+fi
+
+# Store Amadeus hostname (using 'test' environment as specified)
+if aws ssm put-parameter \
+    --name "/travel-agent/amadeus-hostname" \
+    --value "test" \
+    --type "String" \
+    --overwrite \
+    --profile $AWS_PROFILE \
+    --region $REGION >/dev/null 2>&1; then
+    print_status "Amadeus Hostname stored in Parameter Store: /travel-agent/amadeus-hostname (test)"
+else
+    print_error "Failed to store Amadeus Hostname in Parameter Store"
     exit 1
 fi
 
