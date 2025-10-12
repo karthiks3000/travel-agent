@@ -10,7 +10,6 @@ import boto3
 import logging
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
-from strands.hooks import HookRegistry
 from strands.tools.mcp.mcp_client import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
 from bedrock_agentcore import BedrockAgentCoreApp
@@ -21,13 +20,8 @@ from tools.memory_hooks import TravelMemoryHook, generate_session_ids
 
 # Import new unified response models from centralized common location
 from common.models.orchestrator_models import (
-    TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
+    TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress,
 )
-from common.models.flight_models import FlightResult
-from common.models.accommodation_models import PropertyResult
-from common.models.food_models import RestaurantResult
-from common.models.itinerary_models import AttractionResult
-from tools.itinerary_generator import generate_comprehensive_itinerary, TripComponents
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -128,12 +122,13 @@ class TravelOrchestratorAgent(Agent):
             "agent_type": "travel_orchestrator"
         }
         
-        # Configure model with increased max_tokens to prevent truncation
+        # Configure model with increased max_tokens to prevent truncation and enable prompt caching
         model = BedrockModel(
             model_id="us.amazon.nova-premier-v1:0",
             max_tokens=10000,  # Increased from default ~4096 to handle large JSON responses
             temperature=0.7,
-            top_p=0.9
+            top_p=0.9,
+            cache_prompt="default",  # Enable caching for system prompt to reduce costs (Nova uses "default")
         )
         
         super().__init__(
