@@ -286,6 +286,10 @@ export interface ChatState {
   isStreaming: boolean;
   streamingMessageId: string | null;
   
+  // Tool progress states
+  thinkingMessage: string | null;
+  toolProgress: ToolProgress[];
+  
   // Error handling
   error: string | null;
 }

@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
-import { TypingIndicator } from './TypingIndicator';
 import { useChatStore } from '@/stores/chatStore';
 import { MessageSquare } from 'lucide-react';
 
@@ -17,7 +16,7 @@ interface ChatPanelProps {
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({ className }) => {
-  const { messages, isSending, error } = useChatStore();
+  const { messages, error } = useChatStore();
   // const { user } = useAuthStore(); // Removed unused variable
 
   return (
@@ -43,7 +42,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ className }) => {
       <div className="flex-1 flex flex-col min-h-0">
         <ScrollArea className="flex-1 p-4">
           <MessageList messages={messages} />
-          {isSending && <TypingIndicator />}
         </ScrollArea>
 
         {/* Error Display */}

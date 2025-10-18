@@ -3,8 +3,11 @@ Travel Orchestrator Agent - Main conversational interface for travel planning
 """
 import os
 import json
+import threading
+import time
 from datetime import datetime
 from typing import List, Optional
+from queue import Queue, Empty
 
 import boto3
 import logging
@@ -17,6 +20,7 @@ from bedrock_agentcore.memory import MemoryClient
 from tools.flight_search_tool import search_flights_direct
 from tools.accommodation_search_tool import search_accommodations_direct
 from tools.memory_hooks import TravelMemoryHook, generate_session_ids
+from tools.streaming_hooks import StreamingProgressHook
 
 # Import new unified response models from centralized common location
 from common.models.orchestrator_models import (
@@ -65,7 +69,8 @@ def extract_user_id_from_context(context) -> str:
 
 class TravelOrchestratorAgent(Agent):
     def __init__(self, memory_id: Optional[str] = None, session_id: Optional[str] = None, 
-                 actor_id: Optional[str] = None, region: str = "us-east-1"):
+                 actor_id: Optional[str] = None, region: str = "us-east-1", 
+                 streaming_hook: Optional[StreamingProgressHook] = None):
         """
         Initialize Travel Orchestrator Agent with Gateway integration and memory
         
@@ -103,6 +108,14 @@ class TravelOrchestratorAgent(Agent):
                 logger.error(f"Failed to initialize memory: {e}")
                 memory_hooks = None
         
+        # Collect all hooks
+        all_hooks = []
+        if memory_hooks:
+            all_hooks.append(memory_hooks)
+        if streaming_hook:
+            all_hooks.append(streaming_hook)
+            logger.info("✅ Streaming hook added to agent")
+        
         # Initialize Gateway tools via MCP client (GitHub example pattern)
         gateway_tools = self._initialize_gateway_tools(region)
         
@@ -135,7 +148,7 @@ class TravelOrchestratorAgent(Agent):
             model=model,
             tools=all_tools,
             system_prompt=self._build_system_prompt(current_datetime, current_date),
-            hooks=[memory_hooks] if memory_hooks else [],
+            hooks=all_hooks,
             state=agent_state
         )
     
@@ -951,63 +964,200 @@ def initialize_memory(region: str = "us-east-1") -> Optional[str]:
         logger.error(f"Failed to initialize memory: {e}")
         return None
 
-@app.entrypoint
-def travel_orchestrator_invocation(payload, context=None):
-    """Travel orchestrator entry point for AgentCore Runtime - Non-streaming JSON response"""
-    if "prompt" not in payload:
-        return {"error": "Missing 'prompt' in payload"}
+def format_ndjson_event(event_type: str, data: dict) -> str:
+    """
+    Format data as NDJSON (Newline Delimited JSON)
+    
+    Args:
+        event_type: Type of event
+        data: Data to send in the event
+        
+    Returns:
+        NDJSON formatted string
+    """
+    event = {
+        "type": event_type,
+        "data": data
+    }
+    return json.dumps(event) + "\n"
+
+
+def stream_agent_execution(payload, context):
+    """
+    Generator function that yields SSE events during agent execution
+    
+    Args:
+        payload: Request payload containing prompt
+        context: AgentCore runtime context
+        
+    Yields:
+        SSE formatted events as strings
+    """
+    event_queue = Queue()
+    final_result = {}
     
     try:
         region = payload.get("region", "us-east-1")
         
-        # Extract session ID from AgentCore context (from HTTP header)
+        # Extract session ID from AgentCore context
         session_id = None
         if context and hasattr(context, 'session_id'):
             session_id = context.session_id
             logger.info(f"✅ Extracted session ID from AgentCore context: {session_id}")
         
-        # Generate session IDs if still not provided
+        # Generate session IDs if not provided
         if not session_id:
             session_id = generate_session_ids()
             logger.info(f"🆔 Generated new session ID: {session_id}")
-        else:
-            logger.info(f"🔄 Continuing existing session: {session_id}")
-
+        
         actor_id = "travel-orchestrator"
         
-        logger.info(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
-        print(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
+        # Emit initial thinking event
+        yield format_ndjson_event("status", {
+            "message": "Analyzing your request...",
+            "status": "thinking"
+        })
         
-        # Initialize memory (optional - agent works without it)
+        logger.info(f'🚀 Starting streaming travel orchestration - User: {actor_id}, Session: {session_id}')
+        
+        # Initialize memory (optional)
         memory_id = initialize_memory(region=region)
         
-        # Create agent instance with session-specific configuration
+        # Create and add streaming hook
+        streaming_hook = StreamingProgressHook(event_queue)
+        
+        # Create agent instance with streaming hook
         agent = TravelOrchestratorAgent(
             memory_id=memory_id,
             session_id=session_id if isinstance(session_id, str) else str(session_id) if session_id else "anonymous",
             actor_id=actor_id,
-            region=region
+            region=region,
+            streaming_hook=streaming_hook
         )
         
-        logger.info(f'📝 Processing prompt: {payload["prompt"][:100]}...')
+        logger.info(f'📝 Processing prompt with streaming: {payload["prompt"][:100]}...')
         
-        # Get complete response from agent (non-streaming)
-        result = agent(payload["prompt"])
+        # Run agent in background thread
+        def run_agent():
+            try:
+                final_result['data'] = agent(payload["prompt"])
+                final_result['success'] = True
+            except Exception as e:
+                final_result['error'] = str(e)
+                final_result['success'] = False
+                logger.error(f"❌ Agent execution failed: {e}")
         
-        logger.info(f'✅ Agent completed processing')
+        agent_thread = threading.Thread(target=run_agent, daemon=True)
+        agent_thread.start()
         
-        # Use the new parse_agent_response function to handle all response types
-        return parse_agent_response(result)
+        # Stream events as they come in
+        while agent_thread.is_alive() or not event_queue.empty():
+            try:
+                # Get event from queue with timeout
+                event = event_queue.get(timeout=0.2)
+                yield format_ndjson_event(event["event"], event["data"])
+            except Empty:
+                continue
+        
+        # Wait for agent to complete
+        agent_thread.join()
+        
+        # Emit final response
+        if final_result.get('success'):
+            response = parse_agent_response(final_result['data'])
+            yield format_ndjson_event("final_response", response)
+            logger.info(f"✅ Streaming orchestration completed successfully")
+        else:
+            error_response = {
+                "response_type": "conversation",
+                "response_status": "system_error", 
+                "message": "I encountered an internal error. Please try again.",
+                "success": False,
+                "error": final_result.get('error', 'Unknown error')
+            }
+            yield format_ndjson_event("error", error_response)
+            logger.error(f"❌ Streaming orchestration failed: {final_result.get('error')}")
             
     except Exception as e:
-        logger.error(f"Error in travel orchestrator: {str(e)}")
-        return {
-            "error": f"Travel orchestrator failed: {str(e)}",
+        logger.error(f"❌ Fatal error in stream_agent_execution: {e}")
+        error_response = {
             "response_type": "conversation",
-            "response_status": "tool_error",
-            "message": "I encountered an internal error. Please try again.",
-            "success": False
+            "response_status": "system_error",
+            "message": "I encountered a critical error. Please try again.",
+            "success": False,
+            "error": str(e)
         }
+        yield format_ndjson_event("error", error_response)
+
+
+@app.entrypoint
+def travel_orchestrator_invocation(payload, context=None):
+    """Travel orchestrator entry point for AgentCore Runtime - NDJSON Streaming Response"""
+    if "prompt" not in payload:
+        error_response = {"error": "Missing 'prompt' in payload"}
+        return format_ndjson_event("error", error_response)
+    
+    # Return streaming generator for all requests
+    return stream_agent_execution(payload, context)
+
+
+# @app.entrypoint  
+# def travel_orchestrator_invocation_legacy(payload, context=None):
+#     """Travel orchestrator entry point for AgentCore Runtime - Non-streaming JSON response (legacy)"""
+#     if "prompt" not in payload:
+#         return {"error": "Missing 'prompt' in payload"}
+    
+#     try:
+#         region = payload.get("region", "us-east-1")
+        
+#         # Extract session ID from AgentCore context (from HTTP header)
+#         session_id = None
+#         if context and hasattr(context, 'session_id'):
+#             session_id = context.session_id
+#             logger.info(f"✅ Extracted session ID from AgentCore context: {session_id}")
+        
+#         # Generate session IDs if still not provided
+#         if not session_id:
+#             session_id = generate_session_ids()
+#             logger.info(f"🆔 Generated new session ID: {session_id}")
+#         else:
+#             logger.info(f"🔄 Continuing existing session: {session_id}")
+
+#         actor_id = "travel-orchestrator"
+        
+#         logger.info(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
+#         print(f'🚀 Starting travel orchestration - User: {actor_id}, Session: {session_id}')
+        
+#         # Initialize memory (optional - agent works without it)
+#         memory_id = initialize_memory(region=region)
+        
+#         # Create agent instance with session-specific configuration
+#         agent = TravelOrchestratorAgent(
+#             memory_id=memory_id,
+#             session_id=session_id if isinstance(session_id, str) else str(session_id) if session_id else "anonymous",
+#             actor_id=actor_id,
+#             region=region
+#         )
+        
+#         logger.info(f'📝 Processing prompt: {payload["prompt"][:100]}...')
+        
+#         # Get complete response from agent (non-streaming)
+#         result = agent(payload["prompt"])
+        
+#         logger.info(f'✅ Agent completed processing')
+        
+#         # Use the new parse_agent_response function to handle all response types
+#         return parse_agent_response(result)
+            
+#     except Exception as e:
+#         logger.error(f"Error in travel orchestrator: {str(e)}")
+#         return {
+#             "error": f"Travel orchestrator failed: {str(e)}",
+#             "response_type": "conversation",
+#             "response_status": "tool_error",
+#             "message": "I encountered an internal error. Please try again.",
+#             "success": False
+#         }
 
 
 if __name__ == "__main__":

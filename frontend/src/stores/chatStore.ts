@@ -12,7 +12,7 @@ import type {
   Message, 
   ResultData,
   ResultType,
-  AgentCoreRequest 
+  AgentCoreRequest,
 } from '../types/chat';
 
 /**
@@ -52,6 +52,9 @@ export const useChatStore = create<ChatStore>()(
     streamingMessage: null,
     isStreaming: false,
     streamingMessageId: null,
+    // Tool progress state
+    thinkingMessage: null,
+    toolProgress: [],
 
     // Message actions
     sendMessage: async (content: string) => {
@@ -64,13 +67,16 @@ export const useChatStore = create<ChatStore>()(
         return;
       }
 
-      // Clear any previous errors and start streaming
+      // Clear any previous state and start streaming
       set({ 
         error: null, 
         isSending: true,
         isStreaming: true,
         streamingMessage: '',
-        streamingMessageId: generateMessageId()
+        streamingMessageId: generateMessageId(),
+        // Clear progress state
+        thinkingMessage: null,
+        toolProgress: []
       });
 
       // Add user message immediately
@@ -101,103 +107,149 @@ export const useChatStore = create<ChatStore>()(
           },
         };
 
-        // Call AgentCore API with JSON response (non-streaming)
-        const response = await agentCoreClient.invokeAgent(request);
-
-        // Process response based on new backend format
-        let resultType: ResultType | null = null;
-        let resultData: ResultData | null = null;
-        const displayMessage = response.message || "No response";
-
-        // Handle responses with results (check for success and response_type)
-        if (response.success && response.response_type) {
-          // Map response_type to resultType and extract appropriate data
-          switch (response.response_type) {
-            case "flights":
-              resultType = "flights";
-              if (response.flight_results) {
-                resultData = {
-                  type: "flights" as const,
-                  flights: response.flight_results,
-                  timestamp: new Date()
-                };
-              }
-              break;
-            case "accommodations":
-              resultType = "accommodations";
-              if (response.accommodation_results) {
-                resultData = {
-                  type: "accommodations" as const,
-                  best_accommodations: response.accommodation_results,
-                  timestamp: new Date()
-                };
-              }
-              break;
-            case "restaurants":
-              resultType = "restaurants";
-              if (response.restaurant_results) {
-                resultData = {
-                  type: "restaurants" as const,
-                  restaurants: response.restaurant_results,
-                  total_results: response.restaurant_results.length,
-                  timestamp: new Date()
-                };
-              }
-              break;
-            case "attractions":
-              resultType = "attractions";
-              if (response.attraction_results) {
-                resultData = {
-                  type: "attractions" as const,
-                  attractions: response.attraction_results,
-                  total_results: response.attraction_results.length,
-                  timestamp: new Date()
-                };
-              }
-              break;
-            case "itinerary":
-              resultType = "itinerary";
-              if (response.itinerary) {
-                resultData = {
-                  type: "itinerary" as const,
-                  timestamp: new Date(),
-                  ...response.itinerary
-                };
-              }
-              break;
-            default:
-              // conversation or other types - no structured results
-              break;
-          }
-        }
-
-        // Create final agent message when streaming is complete
-        const agentMessage: Message = {
-          id: get().streamingMessageId || generateMessageId(),
-          content: displayMessage,
-          sender: 'agent',
-          timestamp: new Date(),
-          metadata: {
-            sessionId: response.sessionId || sessionId,
-            resultType: resultType || undefined,
-            resultData: resultData || undefined,
-            responseStatus: response.response_status,
-            responseType: response.response_type,
+        // Call AgentCore API with SSE streaming
+        await agentCoreClient.invokeAgentStreaming(request, {
+          onStatus: (status, message) => {
+            console.log('🧠 SSE Status callback fired:', status, message);
+            set({ thinkingMessage: message });
           },
-        };
+          onToolStart: (tool) => {
+            console.log('🔄 SSE Tool Start callback fired:', tool);
+            const current = get().toolProgress;
+            const updated = current.filter(t => t.tool_id !== tool.tool_id);
+            updated.push(tool);
+            console.log('🔄 Updated toolProgress array:', updated);
+            set({ toolProgress: updated });
+          },
+          onToolComplete: (tool) => {
+            console.log('✅ SSE Tool Complete callback fired:', tool);
+            const current = get().toolProgress;
+            const updated = current.map(t => 
+              t.tool_id === tool.tool_id ? { ...t, ...tool } : t
+            );
+            console.log('✅ Updated toolProgress array:', updated);
+            set({ toolProgress: updated });
+          },
+          onFinalResponse: (response) => {
+            // Process final response and create agent message
+            let resultType: ResultType | null = null;
+            let resultData: ResultData | null = null;
+            const displayMessage = response.message || "No response";
 
-        // Update state with final response and clear streaming
-        const currentMessages = get().messages;
-        
-        set({
-          messages: [...currentMessages, agentMessage],
-          currentResults: resultData,
-          resultType: resultType,
-          isSending: false,
-          isStreaming: false,
-          streamingMessage: null,
-          streamingMessageId: null,
-          error: null,
+            // Handle responses with results
+            if (response.success && response.response_type) {
+              switch (response.response_type) {
+                case "flights":
+                  resultType = "flights";
+                  if (response.flight_results) {
+                    resultData = {
+                      type: "flights" as const,
+                      flights: response.flight_results,
+                      timestamp: new Date()
+                    };
+                  }
+                  break;
+                case "accommodations":
+                  resultType = "accommodations";
+                  if (response.accommodation_results) {
+                    resultData = {
+                      type: "accommodations" as const,
+                      best_accommodations: response.accommodation_results,
+                      timestamp: new Date()
+                    };
+                  }
+                  break;
+                case "restaurants":
+                  resultType = "restaurants";
+                  if (response.restaurant_results) {
+                    resultData = {
+                      type: "restaurants" as const,
+                      restaurants: response.restaurant_results,
+                      total_results: response.restaurant_results.length,
+                      timestamp: new Date()
+                    };
+                  }
+                  break;
+                case "attractions":
+                  resultType = "attractions";
+                  if (response.attraction_results) {
+                    resultData = {
+                      type: "attractions" as const,
+                      attractions: response.attraction_results,
+                      total_results: response.attraction_results.length,
+                      timestamp: new Date()
+                    };
+                  }
+                  break;
+                case "itinerary":
+                  resultType = "itinerary";
+                  if (response.itinerary) {
+                    resultData = {
+                      type: "itinerary" as const,
+                      timestamp: new Date(),
+                      ...response.itinerary
+                    };
+                  }
+                  break;
+              }
+            }
+
+            // Create final agent message
+            const agentMessage: Message = {
+              id: get().streamingMessageId || generateMessageId(),
+              content: displayMessage,
+              sender: 'agent',
+              timestamp: new Date(),
+              metadata: {
+                sessionId: response.sessionId || sessionId,
+                resultType: resultType || undefined,
+                resultData: resultData || undefined,
+                responseStatus: response.response_status,
+                responseType: response.response_type,
+              },
+            };
+
+            // Update state with final response and clear streaming/progress
+            const currentMessages = get().messages;
+            
+            set({
+              messages: [...currentMessages, agentMessage],
+              currentResults: resultData,
+              resultType: resultType,
+              isSending: false,
+              isStreaming: false,
+              streamingMessage: null,
+              streamingMessageId: null,
+              thinkingMessage: null,
+              toolProgress: [],
+              error: null,
+            });
+          },
+          onError: (errorMessage) => {
+            // Add error message to chat
+            const errorAgentMessage: Message = {
+              id: generateMessageId(),
+              content: `I'm sorry, I encountered an error: ${errorMessage}. Please try again.`,
+              sender: 'agent',
+              timestamp: new Date(),
+              metadata: {
+                sessionId,
+                error: true,
+              },
+            };
+
+            const currentMessages = get().messages;
+            set({
+              messages: [...currentMessages, errorAgentMessage],
+              isSending: false,
+              isStreaming: false,
+              streamingMessage: null,
+              streamingMessageId: null,
+              thinkingMessage: null,
+              toolProgress: [],
+              error: errorMessage,
+            });
+          }
         });
 
       } catch (error) {
@@ -223,6 +275,8 @@ export const useChatStore = create<ChatStore>()(
           isStreaming: false,
           streamingMessage: null,
           streamingMessageId: null,
+          thinkingMessage: null,
+          toolProgress: [],
           error: errorMessage,
         });
       }
@@ -360,4 +414,23 @@ export const useChatStreaming = () => {
     isStreaming,
     streamingMessageId,
   };
+};
+
+/**
+ * Hook to get tool progress state (for ProgressPanel)
+ */
+export const useToolProgress = () => {
+  const thinkingMessage = useChatStore((state) => state.thinkingMessage);
+  const toolProgress = useChatStore((state) => state.toolProgress);
+  const isSending = useChatStore((state) => state.isSending);
+
+  const result = {
+    thinkingMessage,
+    toolProgress,
+    isActive: isSending && (thinkingMessage !== null || toolProgress.length > 0),
+  };
+
+  console.log('🎯 useToolProgress hook result:', result);
+
+  return result;
 };

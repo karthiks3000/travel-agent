@@ -7,8 +7,9 @@ import React, { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { MessageBubble } from './MessageBubble';
 import { StreamingMessageBubble } from './StreamingMessageBubble';
+import { ProgressPanel } from './ProgressPanel';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useChatStreaming } from '@/stores/chatStore';
+import { useChatStreaming, useToolProgress } from '@/stores/chatStore';
 import type { Message } from '@/types/chat';
 
 interface MessageListProps {
@@ -25,6 +26,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { streamingMessage, isStreaming } = useChatStreaming();
+  const { thinkingMessage, toolProgress, isActive } = useToolProgress();
 
   // Auto-scroll to bottom when new messages arrive or streaming updates
   useEffect(() => {
@@ -34,7 +36,7 @@ export const MessageList: React.FC<MessageListProps> = ({
         block: 'end'
       });
     }
-  }, [messages, streamingMessage]);
+  }, [messages, streamingMessage, thinkingMessage, toolProgress]);
 
   // Show welcome message if no messages
   if (messages.length === 0 && !isLoading) {
@@ -109,8 +111,16 @@ export const MessageList: React.FC<MessageListProps> = ({
         );
       })}
 
-      {/* Streaming message bubble */}
-      {isStreaming && streamingMessage && (
+      {/* Progress panel for tool execution */}
+      {isActive && (
+        <ProgressPanel
+          thinkingMessage={thinkingMessage}
+          toolProgress={toolProgress}
+        />
+      )}
+
+      {/* Fallback streaming message bubble (for non-tool related streaming) */}
+      {isStreaming && streamingMessage && !isActive && (
         <StreamingMessageBubble
           message={streamingMessage}
           showAvatar={messages.length === 0 || messages[messages.length - 1]?.sender !== 'agent'}
