@@ -610,6 +610,13 @@ IAM_ROLE_POLICY=$(cat <<EOF
             "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:browser/*"
         },
         {
+            "Effect": "Allow",
+            "Action": [
+                "aws-marketplace:ViewSubscriptions"
+            ],
+            "Resource": "*"
+        },
+        {
             "Sid": "ParameterStoreAccess",
             "Effect": "Allow",
             "Action": [
@@ -618,18 +625,6 @@ IAM_ROLE_POLICY=$(cat <<EOF
             ],
             "Resource": [
                 "arn:aws:ssm:*:*:parameter/travel-agent/*"
-            ]
-        },
-        {
-            "Sid": "MultiAgentCoordinationAccess",
-            "Effect": "Allow",
-            "Action": [
-                "bedrock-agentcore:InvokeAgentRuntime"
-            ],
-            "Resource": [
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/flight_agent",
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/accommodation_agent", 
-                "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/food_agent"
             ]
         },
         {

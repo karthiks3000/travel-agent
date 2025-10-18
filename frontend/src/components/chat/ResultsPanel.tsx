@@ -224,7 +224,7 @@ const AttractionResultsContent: React.FC<{ results: ResultData }> = ({ results }
         {attractionResults.attractions && attractionResults.attractions.length > 0 && (
           <div className="space-y-3">
             <h4 className="font-medium">Popular Attractions</h4>
-            {attractionResults.attractions.slice(0, 5).map((attraction: AttractionResult, index: number) => (
+            {attractionResults.attractions.map((attraction: AttractionResult, index: number) => (
               <div key={index} className="bg-gray-50 p-3 rounded-lg">
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div><strong>Name:</strong> {attraction.name}</div>
@@ -294,7 +294,7 @@ const RestaurantResultsContent: React.FC<{ results: ResultData }> = ({ results }
         {restaurantResults.restaurants && restaurantResults.restaurants.length > 0 && (
           <div className="space-y-3">
             <h4 className="font-medium">Recommended Restaurants</h4>
-            {restaurantResults.restaurants.slice(0, 3).map((restaurant: RestaurantResult, index: number) => (
+            {restaurantResults.restaurants.map((restaurant: RestaurantResult, index: number) => (
               <div key={index} className="bg-gray-50 p-3 rounded-lg">
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div><strong>Name:</strong> {restaurant.name}</div>

@@ -69,7 +69,7 @@ export const HeroParallax = ({
           translateY,
           opacity,
         }}
-        className=""
+        className="pointer-events-none"
       >
         <motion.div className="flex flex-row-reverse space-x-reverse space-x-20 mb-20">
           {firstRow.map((product, idx) => (

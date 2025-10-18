@@ -1,7 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { HeroParallax } from '@/components/ui/hero-parallax';
 import { TextGenerateEffect } from '@/components/ui/text-generate-effect';
+import { useAuthStore } from '@/stores/authStore';
 
 const products = [
   {
@@ -83,6 +85,28 @@ const products = [
 
 // Custom Header component for our hero section
 const CustomHeader = () => {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuthStore();
+
+  const handleStartPlanning = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isAuthenticated) {
+      navigate('/chat');
+    } else {
+      navigate('/signin');
+    }
+  };
+
+  const handleLearnMore = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const featuresSection = document.getElementById('features');
+    if (featuresSection) {
+      featuresSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
     <div className="max-w-7xl relative mx-auto py-20 md:py-40 px-4 w-full left-0 top-0">
       <TextGenerateEffect 
@@ -102,12 +126,13 @@ const CustomHeader = () => {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 0.8 }}
-        className="flex flex-col sm:flex-row gap-4 mt-8"
+        className="flex flex-col sm:flex-row gap-4 mt-8 relative z-50"
       >
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-3 px-8 rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl"
+          onClick={handleStartPlanning}
+          className="relative z-50 cursor-pointer bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-3 px-8 rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl"
         >
           Start Planning Your Trip
         </motion.button>
@@ -115,7 +140,8 @@ const CustomHeader = () => {
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="border-2 border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 font-semibold py-3 px-8 rounded-lg transition-all duration-300 bg-white/80 backdrop-blur-sm"
+          onClick={handleLearnMore}
+          className="relative z-50 cursor-pointer border-2 border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 font-semibold py-3 px-8 rounded-lg transition-all duration-300 bg-white/80 backdrop-blur-sm"
         >
           Learn More
         </motion.button>

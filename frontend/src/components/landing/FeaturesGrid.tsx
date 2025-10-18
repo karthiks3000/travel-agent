@@ -136,7 +136,7 @@ const CustomHoverEffect = ({
 
 export const FeaturesGrid: React.FC = () => {
   return (
-    <section className="py-20 px-4 bg-gradient-to-b from-white to-gray-50">
+    <section id="features" className="py-20 px-4 bg-gradient-to-b from-white to-gray-50">
       <div className="max-w-7xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

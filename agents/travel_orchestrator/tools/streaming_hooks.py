@@ -60,7 +60,8 @@ class StreamingProgressHook(HookProvider):
             event: BeforeToolCallEvent containing tool information
         """
         try:
-            tool_name = event.selected_tool.name if event.selected_tool else "unknown_tool"
+            # Extract tool name with multiple fallback strategies
+            tool_name = self._extract_tool_name(event.selected_tool)
             
             # Get display information
             display_name = self.tool_display_mapping.get(tool_name, self._humanize_tool_name(tool_name))
@@ -81,7 +82,7 @@ class StreamingProgressHook(HookProvider):
             logger.info(f"🔄 Tool started: {display_name}")
             
         except Exception as e:
-            logger.error(f"Error in on_tool_start: {e}")
+            logger.error(f"Error in on_tool_start: {e}", exc_info=True)
     
     def on_tool_complete(self, event: AfterToolCallEvent) -> None:
         """
@@ -91,7 +92,8 @@ class StreamingProgressHook(HookProvider):
             event: AfterToolCallEvent containing tool results
         """
         try:
-            tool_name = event.selected_tool.name if event.selected_tool else "unknown_tool"
+            # Extract tool name with multiple fallback strategies
+            tool_name = self._extract_tool_name(event.selected_tool)
             
             # Determine success/failure status
             status = "failed" if event.exception else "completed"
@@ -121,7 +123,50 @@ class StreamingProgressHook(HookProvider):
             self.event_queue.put(sse_event)
             
         except Exception as e:
-            logger.error(f"Error in on_tool_complete: {e}")
+            logger.error(f"Error in on_tool_complete: {e}", exc_info=True)
+    
+    def _extract_tool_name(self, tool_obj: Any) -> str:
+        """
+        Extract tool name from tool object with multiple fallback strategies
+        
+        Args:
+            tool_obj: Tool object from event
+            
+        Returns:
+            Tool name string
+        """
+        if not tool_obj:
+            return "unknown_tool"
+        
+        # Strategy 1: Try .name attribute
+        if hasattr(tool_obj, 'name'):
+            return tool_obj.name
+        
+        # Strategy 2: Try .tool_name attribute
+        if hasattr(tool_obj, 'tool_name'):
+            return tool_obj.tool_name
+        
+        # Strategy 3: Try .func.__name__ (for decorated functions)
+        if hasattr(tool_obj, 'func') and hasattr(tool_obj.func, '__name__'):
+            return tool_obj.func.__name__
+        
+        # Strategy 4: Try ._name attribute (some tools use private attr)
+        if hasattr(tool_obj, '_name'):
+            return tool_obj._name
+        
+        # Strategy 5: Convert object to string and extract
+        tool_str = str(tool_obj)
+        if 'search_flights' in tool_str:
+            return 'search_flights'
+        elif 'search_accommodations' in tool_str:
+            return 'search_accommodations'
+        elif 'searchPlacesByText' in tool_str or 'search_places' in tool_str:
+            return 'searchPlacesByText'
+        
+        logger.warning(tool_obj)
+        # Fallback: Use string representation
+        logger.warning(f"Could not extract tool name from {type(tool_obj)}, using string repr")
+        return tool_str[:50]  # Limit length
     
     def _humanize_tool_name(self, tool_name: str) -> str:
         """
