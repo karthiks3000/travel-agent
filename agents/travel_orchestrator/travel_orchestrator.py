@@ -1151,7 +1151,7 @@ def stream_agent_execution(payload, context):
         
         # Emit initial thinking event
         yield format_ndjson_event("status", {
-            "message": "Analyzing your request...",
+            "message": "Analyzing your request, this may take a few minutes...",
             "status": "thinking"
         })
         
