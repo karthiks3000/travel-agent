@@ -191,6 +191,19 @@ export const useChatStore = create<ChatStore>()(
                     };
                   }
                   break;
+                case "mixed_results":
+                  resultType = "mixed_results";
+                  // Combine all available results into one data structure
+                  resultData = {
+                    type: "mixed_results" as const,
+                    flights: response.flight_results || [],
+                    accommodations: response.accommodation_results || [],
+                    restaurants: response.restaurant_results || [],
+                    attractions: response.attraction_results || [],
+                    timestamp: new Date(),
+                    recommendation: response.message
+                  };
+                  break;
               }
             }
 

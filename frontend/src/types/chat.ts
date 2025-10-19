@@ -15,7 +15,7 @@ export interface Message {
     sessionId?: string;
     error?: boolean;
     responseStatus?: ResponseStatus;
-    responseType?: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary';
+    responseType?: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary' | 'mixed_results';
     toolProgress?: ToolProgress[];
     overallProgressMessage?: string;
     isFinalResponse?: boolean;
@@ -58,7 +58,7 @@ export interface ToolProgress {
 }
 
 // Result types that can be returned by the agent
-export type ResultType = 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary';
+export type ResultType = 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary' | 'mixed_results';
 
 // Base result data interface
 export interface BaseResultData {
@@ -182,6 +182,15 @@ export interface AttractionSearchResults extends BaseResultData {
   };
 }
 
+// Mixed results data (multiple component types combined)
+export interface MixedResults extends BaseResultData {
+  type: 'mixed_results';
+  flights?: FlightResult[];
+  accommodations?: PropertyResult[];
+  restaurants?: RestaurantResult[];
+  attractions?: AttractionResult[];
+}
+
 // Enhanced itinerary models matching backend
 export type ActivityType = 
   | 'flight' 
@@ -255,6 +264,7 @@ export type ResultData =
   | AccommodationSearchResults 
   | RestaurantSearchResults
   | AttractionSearchResults 
+  | MixedResults
   | (TravelItinerary & BaseResultData);
 
 // Chat session interface
@@ -335,7 +345,7 @@ export interface AgentCoreResponse {
   error?: string;
   
   // Orchestrator response fields
-  response_type: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary';
+  response_type: 'conversation' | 'flights' | 'accommodations' | 'restaurants' | 'attractions' | 'itinerary' | 'mixed_results';
   response_status: ResponseStatus;
   overall_progress_message: string;
   is_final_response: boolean;

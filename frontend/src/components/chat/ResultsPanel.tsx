@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { useChatResults } from '@/stores/chatStore';
 import { BarChart3, Plane, Building, UtensilsCrossed, MapPin, AlertCircle, ExternalLink, Camera } from 'lucide-react';
-import type { ResultData, FlightSearchResults, AccommodationSearchResults, TravelItinerary, RestaurantResult, AttractionResult } from '@/types/chat';
+import type { ResultData, FlightSearchResults, AccommodationSearchResults, TravelItinerary, RestaurantResult, AttractionResult, MixedResults } from '@/types/chat';
 import { FlightOptions, AccommodationOptions } from '@/components/travel/ComponentResults';
 import { ItineraryTimeline } from '@/components/travel/ItineraryTimeline';
 
@@ -164,6 +164,8 @@ const ResultsContent: React.FC<ResultsContentProps> = ({ results }) => {
       return <AttractionResultsContent results={results} />;
     case 'itinerary':
       return <ItineraryResultsContent results={results} />;
+    case 'mixed_results':
+      return <MixedResultsContent results={results} />;
     default:
       return <GenericResultsContent results={results} />;
   }
@@ -350,6 +352,132 @@ const ItineraryResultsContent: React.FC<{ results: ResultData }> = ({ results })
         <p className="text-gray-600">No itinerary data available.</p>
       </CardContent>
     </Card>
+  );
+};
+
+// Mixed results component - shows all result types together
+const MixedResultsContent: React.FC<{ results: ResultData }> = ({ results }) => {
+  // Type guard for mixed results
+  if (!('flights' in results) && !('accommodations' in results) && !('restaurants' in results)) {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <p className="text-gray-600">No results available.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const mixedResults = results as MixedResults;
+  
+  return (
+    <div className="space-y-6">
+      {mixedResults.recommendation && (
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-gray-700">{mixedResults.recommendation}</p>
+          </CardContent>
+        </Card>
+      )}
+      
+      {mixedResults.flights && mixedResults.flights.length > 0 && (
+        <div>
+          <h4 className="text-lg font-semibold mb-3 flex items-center">
+            <Plane className="w-5 h-5 mr-2" />
+            Flight Options
+          </h4>
+          <FlightOptions flights={mixedResults.flights} showMultiple={true} />
+        </div>
+      )}
+      
+      {mixedResults.accommodations && mixedResults.accommodations.length > 0 && (
+        <div>
+          <h4 className="text-lg font-semibold mb-3 flex items-center">
+            <Building className="w-5 h-5 mr-2" />
+            Accommodation Options
+          </h4>
+          <AccommodationOptions accommodations={mixedResults.accommodations} showMultiple={true} />
+        </div>
+      )}
+      
+      {mixedResults.restaurants && mixedResults.restaurants.length > 0 && (
+        <div>
+          <h4 className="text-lg font-semibold mb-3 flex items-center">
+            <UtensilsCrossed className="w-5 h-5 mr-2" />
+            Restaurant Recommendations
+          </h4>
+          <Card>
+            <CardContent className="p-4">
+              <div className="space-y-3">
+                {mixedResults.restaurants.map((restaurant: RestaurantResult, index: number) => (
+                  <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div><strong>Name:</strong> {restaurant.name}</div>
+                      <div><strong>Rating:</strong> {restaurant.rating || 'N/A'}</div>
+                      <div><strong>Price Level:</strong> {restaurant.price_level || 'N/A'}</div>
+                      <div><strong>Open Now:</strong> {restaurant.is_open_now ? 'Yes' : 'No'}</div>
+                      <div className="col-span-2"><strong>Address:</strong> {restaurant.address}</div>
+                    </div>
+                    {restaurant.place_id && (
+                      <div className="mt-3 pt-2 border-t border-gray-200">
+                        <a
+                          href={getGoogleMapsUrl(restaurant.place_id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
+                        >
+                          <MapPin className="w-4 h-4 mr-1" />
+                          View on Google Maps
+                          <ExternalLink className="w-3 h-3 ml-1" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      
+      {mixedResults.attractions && mixedResults.attractions.length > 0 && (
+        <div>
+          <h4 className="text-lg font-semibold mb-3 flex items-center">
+            <Camera className="w-5 h-5 mr-2" />
+            Tourist Attractions
+          </h4>
+          <Card>
+            <CardContent className="p-4">
+              <div className="space-y-3">
+                {mixedResults.attractions.map((attraction: AttractionResult, index: number) => (
+                  <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div><strong>Name:</strong> {attraction.name}</div>
+                      <div><strong>Rating:</strong> {attraction.rating || 'N/A'}</div>
+                      <div className="col-span-2"><strong>Address:</strong> {attraction.formatted_address}</div>
+                    </div>
+                    {attraction.place_id && (
+                      <div className="mt-3 pt-2 border-t border-gray-200">
+                        <a
+                          href={getGoogleMapsUrl(attraction.place_id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
+                        >
+                          <MapPin className="w-4 h-4 mr-1" />
+                          View on Google Maps
+                          <ExternalLink className="w-3 h-3 ml-1" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
   );
 };
 
