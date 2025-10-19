@@ -18,7 +18,8 @@ from mcp.client.streamable_http import streamablehttp_client
 from bedrock_agentcore import BedrockAgentCoreApp
 from bedrock_agentcore.memory import MemoryClient
 from tools.flight_search_tool import search_flights_direct
-from tools.accommodation_search_tool import search_accommodations_direct
+from tools.hotel_search_tool import search_hotels_amadeus
+from tools.airbnb_search_tool import search_airbnb_direct
 from tools.memory_hooks import TravelMemoryHook, generate_session_ids
 from tools.streaming_hooks import StreamingProgressHook
 
@@ -94,8 +95,8 @@ class TravelOrchestratorAgent(Agent):
         # Initialize Nova Act API key as environment variable for tools
         self._initialize_nova_act_api_key()
         
-        # Initialize Amadeus API credentials as environment variables for tools
-        self._initialize_amadeus_credentials()
+        # Initialize Amadeus client once per session (loads credentials and creates client)
+        self.amadeus_client = self._initialize_amadeus_client()
         
         # Initialize memory if enabled
         memory_hooks = None
@@ -123,7 +124,8 @@ class TravelOrchestratorAgent(Agent):
         all_tools = (
             [
                 self.search_flights,
-                self.search_accommodations,
+                self.search_hotels,
+                self.search_airbnb,
             ]
             + gateway_tools  # Add Google Maps tools from Gateway
         )
@@ -263,49 +265,62 @@ class TravelOrchestratorAgent(Agent):
         except Exception as e:
             logger.error(f"❌ Failed to initialize Nova Act API key: {e}")
     
-    def _initialize_amadeus_credentials(self):
+    def _initialize_amadeus_client(self):
         """
-        Initialize Amadeus API credentials as environment variables for tools to use
+        Initialize Amadeus API client once per session
         
-        Fetches from Parameter Store or existing environment variables and sets 
-        AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET, AMADEUS_HOSTNAME environment variables
-        for the flight search tool to access
+        Loads credentials from Parameter Store (or environment) and creates the client.
+        This method is called during agent initialization and the client is reused
+        across all tool calls within the same AgentCore Runtime session.
+        
+        Returns:
+            Configured Amadeus Client or None if credentials are missing
         """
         try:
+            from amadeus import Client
+            
             # Check if already set in environment
-            existing_client_id = os.getenv('AMADEUS_CLIENT_ID')
-            existing_client_secret = os.getenv('AMADEUS_CLIENT_SECRET')
+            client_id = os.getenv('AMADEUS_CLIENT_ID')
+            client_secret = os.getenv('AMADEUS_CLIENT_SECRET')
+            hostname = os.getenv('AMADEUS_HOSTNAME', 'test')
             
-            if existing_client_id and existing_client_secret:
-                logger.info("✅ Amadeus API credentials already available in environment")
-                return
-            
-            # Try to get from Parameter Store first
-            try:
-                amadeus_client_id = get_parameter('/travel-agent/amadeus-client-id')
-                amadeus_client_secret = get_parameter('/travel-agent/amadeus-client-secret')
-                amadeus_hostname = get_parameter('/travel-agent/amadeus-hostname')
-                
-                if amadeus_client_id and amadeus_client_secret:
-                    os.environ['AMADEUS_CLIENT_ID'] = amadeus_client_id
-                    os.environ['AMADEUS_CLIENT_SECRET'] = amadeus_client_secret
-                    os.environ['AMADEUS_HOSTNAME'] = amadeus_hostname or 'test'  # Default to 'test'
-                    logger.info("✅ Amadeus API credentials loaded from Parameter Store and set in environment")
-                    logger.info(f"✅ Using Amadeus hostname: {amadeus_hostname or 'test'}")
-                    return
-                else:
-                    logger.warning("⚠️  Incomplete Amadeus credentials found in Parameter Store")
+            # If not in environment, try to get from Parameter Store
+            if not client_id or not client_secret:
+                try:
+                    client_id = get_parameter('/travel-agent/amadeus-client-id')
+                    client_secret = get_parameter('/travel-agent/amadeus-client-secret')
+                    hostname = get_parameter('/travel-agent/amadeus-hostname') or 'test'
                     
-            except Exception as e:
-                logger.warning(f"⚠️  Could not retrieve Amadeus credentials from Parameter Store: {e}")
+                    # Store in environment for consistency
+                    if client_id and client_secret:
+                        os.environ['AMADEUS_CLIENT_ID'] = client_id
+                        os.environ['AMADEUS_CLIENT_SECRET'] = client_secret
+                        os.environ['AMADEUS_HOSTNAME'] = hostname
+                        logger.info("✅ Amadeus credentials loaded from Parameter Store")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️  Could not retrieve Amadeus credentials from Parameter Store: {e}")
             
-            # Log warning if no credentials available
-            logger.warning("⚠️  Amadeus API credentials not available - flight search tools may fail")
+            # Verify we have credentials
+            if not client_id or not client_secret:
+                logger.warning("⚠️  Amadeus credentials not available - client not initialized")
+                return None
+            
+            # Create Amadeus client
+            client = Client(
+                client_id=client_id,
+                client_secret=client_secret,
+                hostname=hostname
+            )
+            
+            logger.info(f"✅ Amadeus client initialized once for session (hostname: {hostname})")
+            return client
             
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Amadeus API credentials: {e}")
+            logger.error(f"❌ Failed to initialize Amadeus client: {e}")
+            return None
     
-    def _validate_flight_params(self, origin: str, destination: str, departure_date: str, 
+    def _validate_flight_params(self, origin: str, destination: str, departure_date: str,
                                return_date: Optional[str] = None, passengers: int = 1) -> List[str]:
         """
         Validate flight search parameters
@@ -431,19 +446,34 @@ PRE-FLIGHT CHECKLIST (verify before responding):
 
 1. search_flights(origin, destination, departure_date, return_date?, adults=1, children=0, 
                   infants=0, travel_class?, non_stop=false, max_price?, max_results=50)
-   → Returns TravelOrchestratorResponse with flight_results array
+   → Amadeus API - Returns TravelOrchestratorResponse with flight_results array
+   → USE FOR: all flight searches
 
-2. search_accommodations(destination, departure_date, return_date, passengers=2, 
-                         rooms=1, platform_preference="both")
+2. search_hotels(city_code, check_in, check_out, guests=2, rooms=1)
+   → Amadeus API (two-step: Hotel List + Hotel Search)
    → Returns TravelOrchestratorResponse with accommodation_results array
+   → USE FOR: hotel searches, business travel, chain hotels
+   → city_code: IATA city code like 'PAR', 'NYC', 'LON' (same codes used for flights)
 
-3. searchPlacesByText(textQuery, includedType?, maxResultCount?, minRating?, 
+3. search_airbnb(location, check_in, check_out, guests=2)
+   → Browser automation via Nova Act
+   → Returns TravelOrchestratorResponse with accommodation_results array
+   → USE FOR: vacation rentals, apartments, unique stays, Airbnb-specific requests
+   → Location accepts detailed addresses like 'Paris, France', 'Manhattan, NYC'
+
+4. searchPlacesByText(textQuery, includedType?, maxResultCount?, minRating?, 
                       priceLevels?, location?)
    → Google Places API - USE FOR: restaurants, attractions, POIs
    → YOU must parse results into RestaurantResult or AttractionResult objects
 
-4. searchNearbyPlaces / getPlaceDetails
+5. searchNearbyPlaces / getPlaceDetails
    → Additional Google Places tools for nearby searches and details
+
+ACCOMMODATION TOOL SELECTION GUIDE:
+→ For "hotels": Use search_hotels (faster, API-based)
+→ For "Airbnb" or "vacation rentals": Use search_airbnb
+→ For "accommodations" (generic): Call BOTH tools in parallel for comprehensive results
+→ LLM can intelligently choose based on user intent and context
 
 ═══════════════════════════════════════════════════════════════════════════════
 🎯 REQUEST CLASSIFICATION & RESPONSE TYPE LOGIC
@@ -464,7 +494,7 @@ ANALYZE USER REQUEST → CLASSIFY → SET CORRECT response_type:
 │ "flights + hotels"        │ return combined data  │                         │
 │ "restaurants + attractions"│                      │                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Complete trip planning    │ Call all tools,       │ "itinerary"             │
+│ Complete trip planning    │ Call relevant tools,  │ "itinerary"             │
 │ "plan my 5-day trip"      │ build day-by-day plan │                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Questions, clarifications,│ No tool calls needed  │ "conversation"          │
@@ -477,6 +507,7 @@ ANALYZE USER REQUEST → CLASSIFY → SET CORRECT response_type:
 ✓ IF attraction_results has data → response_type = "attractions" or "mixed_results"
 ✓ IF flight_results has data → response_type = "flights" or "mixed_results"
 ✓ IF accommodation_results has data → response_type = "accommodations" or "mixed_results"
+✓ IF itinerary has data → response_type = "itinerary"
 
 ✗ NEVER use response_type="conversation" when ANY structured results exist
 ✗ NEVER put structured data only in message field
@@ -592,6 +623,26 @@ CONVERSATION CONTEXT:
 → If user says "next Friday", calculate actual date from today ({current_date})
 
 ═══════════════════════════════════════════════════════════════════════════════
+⏰ TIME FORMAT REQUIREMENT FOR ITINERARIES
+═══════════════════════════════════════════════════════════════════════════════
+
+When generating itineraries, ALL time_slot.start_time and time_slot.end_time fields MUST use:
+**12-hour format with AM/PM**
+
+✓ CORRECT EXAMPLES:
+  - "9:00 AM"
+  - "2:30 PM" 
+  - "11:45 PM"
+  - "12:00 PM" (noon)
+  - "12:00 AM" (midnight)
+
+✗ WRONG - DO NOT USE:
+  - "09:00" (24-hour format)
+  - "14:30" (24-hour format)
+  - "9:00AM" (missing space before AM)
+  - "9 AM" (missing minutes)
+
+═══════════════════════════════════════════════════════════════════════════════
 📄 FULL RESPONSE SCHEMA
 ═══════════════════════════════════════════════════════════════════════════════
 {TravelOrchestratorResponse.model_json_schema()}"""
@@ -689,8 +740,9 @@ CONVERSATION CONTEXT:
             print(f"   Return: {return_date} | Passengers: {total_passengers} (Adults: {adults}, Children: {children}, Infants: {infants})")
         
         try:
-            # Call the direct flight search tool with all new parameters
+            # Call the direct flight search tool with amadeus client and all parameters
             return search_flights_direct(
+                amadeus_client=self.amadeus_client,
                 origin=origin,
                 destination=destination, 
                 departure_date=departure_date,
@@ -733,41 +785,58 @@ CONVERSATION CONTEXT:
             )
 
     @tool
-    def search_accommodations(self, destination: str, departure_date: str, return_date: str, 
-                            passengers: int = 2, rooms: int = 1, platform_preference: str = "both") -> TravelOrchestratorResponse:
+    def search_hotels(
+        self,
+        city_code: str,
+        check_in: str,
+        check_out: str, 
+        guests: int = 2,
+        rooms: int = 1
+    ) -> TravelOrchestratorResponse:
         """
-        Search for accommodations using standardized parameters
+        Search for hotels using Amadeus API
+        
+        Uses two-step process: Hotel List API to find hotels, then Hotel Search API for offers.
         
         Args:
-            destination: Destination city or location (e.g., 'Paris, France', 'Manhattan, NYC')
-            departure_date: Check-in date in YYYY-MM-DD format (same as flight departure)
-            return_date: Check-out date in YYYY-MM-DD format (same as flight return)
-            passengers: Number of guests/passengers (1-30)
+            city_code: IATA city code (e.g., 'PAR' for Paris, 'NYC' for New York, 'LON' for London)
+            check_in: Check-in date in YYYY-MM-DD format
+            check_out: Check-out date in YYYY-MM-DD format
+            guests: Number of adult guests (1-30)
             rooms: Number of rooms (1-8)
-            platform_preference: "airbnb", "booking", or "both"
         
         Returns:
-            TravelOrchestratorResponse with structured accommodation results and progress tracking
+            TravelOrchestratorResponse with hotel search results
         """
-        # Validate parameters using dedicated validation method
-        validation_errors = self._validate_accommodation_params(destination, departure_date, return_date, passengers, rooms)
+        print(f"🏨 Hotel search: {city_code} | {check_in} to {check_out} | {guests} guests, {rooms} rooms")
         
-        # Return validation error if parameters are invalid
-        if validation_errors:
-            validation_progress = create_tool_progress("search_accommodations", {"destination": destination}, "failed")
-            validation_progress.error_message = f"Missing required parameters: {', '.join(validation_errors)}"
+        try:
+            return search_hotels_amadeus(
+                amadeus_client=self.amadeus_client,
+                city_code=city_code,
+                check_in=check_in,
+                check_out=check_out,
+                guests=guests,
+                rooms=rooms
+            )
+            
+        except Exception as e:
+            print(f"❌ Hotel search failed: {str(e)}")
+            
+            hotel_progress = create_tool_progress("search_hotels", {"city_code": city_code}, "failed")
+            hotel_progress.error_message = str(e)
             
             return TravelOrchestratorResponse(
                 response_type=ResponseType.CONVERSATION,
-                response_status=ResponseStatus.VALIDATION_ERROR,
-                message=f"I need more information to search for accommodations. Missing: {', '.join(validation_errors)}",
-                overall_progress_message="Accommodation search needs more details",
-                is_final_response=False,
-                next_expected_input_friendly=f"Please provide: {', '.join(validation_errors)}",
-                tool_progress=[validation_progress],
+                response_status=ResponseStatus.TOOL_ERROR,
+                message="I encountered an error while searching for hotels. Please try again or provide more specific details.",
+                overall_progress_message="Hotel search failed due to an error",
+                is_final_response=True,
+                tool_progress=[hotel_progress],
                 success=False,
-                error_message=f"Missing parameters: {', '.join(validation_errors)}",
+                error_message=str(e),
                 processing_time_seconds=0,
+                next_expected_input_friendly=None,
                 flight_results=None,
                 accommodation_results=None,
                 restaurant_results=None,
@@ -777,27 +846,50 @@ CONVERSATION CONTEXT:
                 recommendations=None,
                 session_metadata=None
             )
+
+    @tool
+    def search_airbnb(
+        self,
+        location: str,
+        check_in: str,
+        check_out: str,
+        guests: int = 2
+    ) -> TravelOrchestratorResponse:
+        """
+        Search for Airbnb vacation rentals using browser automation
         
-        print(f"🏨 Direct accommodation search: {destination} | {departure_date} to {return_date} | {passengers} guests, {rooms} rooms")
+        Args:
+            location: Destination city or location (e.g., 'Paris, France', 'Manhattan, NYC')
+            check_in: Check-in date in YYYY-MM-DD format
+            check_out: Check-out date in YYYY-MM-DD format
+            guests: Number of guests (1-30)
+        
+        Returns:
+            TravelOrchestratorResponse with Airbnb search results
+        """
+        print(f"🏠 Airbnb search: {location} | {check_in} to {check_out} | {guests} guests")
         
         try:
-            # Map standardized parameters to accommodation search function
-            return search_accommodations_direct(destination, departure_date, return_date, passengers, rooms, platform_preference)
+            return search_airbnb_direct(
+                location=location,
+                check_in=check_in,
+                check_out=check_out,
+                guests=guests
+            )
             
         except Exception as e:
-            print(f"❌ Direct accommodation search failed: {str(e)}")
+            print(f"❌ Airbnb search failed: {str(e)}")
             
-            # Create error response
-            accommodation_progress = create_tool_progress("search_accommodations", {"destination": destination}, "failed")
-            accommodation_progress.error_message = str(e)
+            airbnb_progress = create_tool_progress("search_airbnb", {"location": location}, "failed")
+            airbnb_progress.error_message = str(e)
             
             return TravelOrchestratorResponse(
                 response_type=ResponseType.CONVERSATION,
                 response_status=ResponseStatus.TOOL_ERROR,
-                message="I encountered an error while searching for accommodations. Please try again or provide more specific details.",
-                overall_progress_message="Accommodation search failed due to an error",
+                message="I encountered an error while searching Airbnb. Please try again or provide more specific details.",
+                overall_progress_message="Airbnb search failed due to an error",
                 is_final_response=True,
-                tool_progress=[accommodation_progress],
+                tool_progress=[airbnb_progress],
                 success=False,
                 error_message=str(e),
                 processing_time_seconds=0,

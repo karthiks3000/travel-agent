@@ -1,6 +1,6 @@
 import type { TravelItinerary, DailyItinerary, ItineraryActivity, ActivityType } from '../../types/chat';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { CalendarIcon, ClockIcon, MapPinIcon } from 'lucide-react';
+import { CalendarIcon, ClockIcon, MapPinIcon, PlaneIcon, ExternalLinkIcon, DollarSignIcon } from 'lucide-react';
 
 interface ItineraryTimelineProps {
   itinerary: TravelItinerary;
@@ -129,10 +129,8 @@ function DayCard({ day, onActivityClick, onDayClick }: DayCardProps) {
   };
 
   const formatTime = (timeStr: string) => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
-    return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+    // Time is already in display format (e.g., "9:00 AM", "2:30 PM")
+    return timeStr;
   };
 
   const getActivityIcon = (activityType: ActivityType) => {
@@ -157,6 +155,23 @@ function DayCard({ day, onActivityClick, onDayClick }: DayCardProps) {
       general: 'border-indigo-200 bg-indigo-50'
     };
     return colorMap[activityType] || 'border-gray-200 bg-gray-50';
+  };
+
+  // Helper to get website from activity details
+  const getActivityWebsite = (activity: ItineraryActivity): string | null => {
+    const details = activity.activity_details;
+    
+    if ('website' in details && typeof details.website === 'string') {
+      return details.website; // Attraction
+    }
+    if ('website_uri' in details && typeof details.website_uri === 'string') {
+      return details.website_uri; // Restaurant
+    }
+    if ('url' in details && typeof details.url === 'string') {
+      return details.url; // Accommodation
+    }
+    
+    return null;
   };
 
   return (
@@ -208,35 +223,88 @@ function DayCard({ day, onActivityClick, onDayClick }: DayCardProps) {
                 onActivityClick?.(activity);
               }}
             >
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 min-w-20">
-                  <span className="text-lg">{getActivityIcon(activity.activity_type)}</span>
-                  <div className="text-xs">
-                    <ClockIcon className="h-3 w-3 inline mr-1" />
-                    {formatTime(activity.time_slot.start_time)}
+              <div className="space-y-2">
+                {/* Header row */}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 min-w-20">
+                    <span className="text-lg">{getActivityIcon(activity.activity_type)}</span>
+                    <div className="text-xs font-medium">
+                      <ClockIcon className="h-3 w-3 inline mr-1" />
+                      {formatTime(activity.time_slot.start_time)}
+                    </div>
                   </div>
-                </div>
-                
-                <div className="flex-1">
-                  <div className="font-medium text-sm">{activity.title}</div>
-                  {activity.notes && (
-                    <div className="text-xs text-muted-foreground">{activity.notes}</div>
+                  
+                  <div className="flex-1">
+                    <div className="font-semibold text-sm">{activity.title}</div>
+                  </div>
+                  
+                  {/* Price display */}
+                  {activity.estimated_cost !== null && activity.estimated_cost !== undefined && (
+                    <div className="flex items-center gap-1 text-xs font-semibold text-green-700">
+                      <DollarSignIcon className="h-3 w-3" />
+                      {activity.estimated_cost.toFixed(0)}
+                    </div>
                   )}
                 </div>
-                
-                {/* Activity-specific details */}
-                <div className="text-xs text-muted-foreground">
-                  {activity.activity_type === 'restaurant' && 'activity_details' in activity.activity_details && 
-                   'rating' in activity.activity_details && activity.activity_details.rating && (
-                    <span>⭐ {activity.activity_details.rating}</span>
-                  )}
-                  {activity.activity_type === 'attraction' && 'activity_details' in activity.activity_details && 
-                   'visit_duration_estimate' in activity.activity_details && activity.activity_details.visit_duration_estimate && (
-                    <span>{activity.activity_details.visit_duration_estimate}min</span>
-                  )}
-                  {activity.activity_type === 'transportation' && 'activity_details' in activity.activity_details && 
-                   'cost_estimate' in activity.activity_details && activity.activity_details.cost_estimate && (
-                    <span>${activity.activity_details.cost_estimate}</span>
+
+                {/* Flight details */}
+                {activity.activity_type === 'flight' && 'departure_airport' in activity.activity_details && (
+                  <div className="pl-8 text-xs text-muted-foreground space-y-1">
+                    <div className="flex items-center gap-2">
+                      <PlaneIcon className="h-3 w-3" />
+                      <span className="font-medium">
+                        {activity.activity_details.departure_airport} → {activity.activity_details.arrival_airport}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span>Departs: {activity.activity_details.departure_time}</span>
+                      <span>•</span>
+                      <span>Arrives: {activity.activity_details.arrival_time}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span>Duration: {activity.activity_details.duration}</span>
+                      <span>•</span>
+                      <span>Stops: {activity.activity_details.stops}</span>
+                      {activity.activity_details.stop_details && (
+                        <>
+                          <span>•</span>
+                          <span>{activity.activity_details.stop_details}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Activity notes */}
+                {activity.notes && (
+                  <div className="pl-8 text-xs text-muted-foreground italic">
+                    {activity.notes}
+                  </div>
+                )}
+
+                {/* Additional details and website link */}
+                <div className="pl-8 flex items-center justify-between">
+                  <div className="text-xs text-muted-foreground">
+                    {activity.activity_type === 'restaurant' && 'rating' in activity.activity_details && activity.activity_details.rating && (
+                      <span>⭐ {activity.activity_details.rating}</span>
+                    )}
+                    {activity.activity_type === 'attraction' && 'visit_duration_estimate' in activity.activity_details && activity.activity_details.visit_duration_estimate && (
+                      <span>⏱️ {activity.activity_details.visit_duration_estimate} min visit</span>
+                    )}
+                  </div>
+                  
+                  {/* Website link */}
+                  {getActivityWebsite(activity) && (
+                    <a
+                      href={getActivityWebsite(activity)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ExternalLinkIcon className="h-3 w-3" />
+                      Visit Website
+                    </a>
                   )}
                 </div>
               </div>

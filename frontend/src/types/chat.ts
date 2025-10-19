@@ -192,8 +192,8 @@ export type ActivityType =
   | 'general';
 
 export interface TimeSlot {
-  start_time: string; // HH:MM format
-  end_time?: string;
+  start_time: string; // 12-hour format with AM/PM (e.g., "9:00 AM", "2:30 PM")
+  end_time?: string;  // 12-hour format with AM/PM
   duration_minutes?: number;
 }
 
@@ -220,6 +220,7 @@ export interface ItineraryActivity {
   title: string;
   activity_details: FlightResult | PropertyResult | RestaurantResult | AttractionResult | TransportationActivity | GeneralActivity;
   notes?: string;
+  estimated_cost?: number | null; // Computed field from backend
 }
 
 export interface DailyItinerary {

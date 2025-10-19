@@ -1,9 +1,9 @@
 """
 Enhanced itinerary models for comprehensive travel planning
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from typing import Union, List, Optional
-from datetime import date as date_type, time, datetime
+from datetime import date as date_type, datetime
 from enum import Enum
 
 # Import existing models
@@ -20,8 +20,14 @@ class ActivityType(str, Enum):
     GENERAL = "general"  # shopping, walking, free time
 
 class TimeSlot(BaseModel):
-    start_time: time = Field(..., description="Activity start time")
-    end_time: Optional[time] = Field(None, description="Activity end time (optional)")
+    start_time: str = Field(
+        ..., 
+        description="Activity start time in 12-hour format with AM/PM (e.g., '9:00 AM', '2:30 PM', '11:45 PM')"
+    )
+    end_time: Optional[str] = Field(
+        None, 
+        description="Activity end time in 12-hour format with AM/PM (optional)"
+    )
     duration_minutes: Optional[int] = Field(None, description="Estimated duration in minutes")
 
 class AttractionResult(BaseModel):
@@ -74,6 +80,22 @@ class ItineraryActivity(BaseModel):
     ] = Field(..., description="Specific activity details")
     
     notes: Optional[str] = Field(None, description="Travel planner notes and recommendations")
+    
+    @computed_field
+    @property
+    def estimated_cost(self) -> Optional[float]:
+        """Extract cost from activity details regardless of type"""
+        details = self.activity_details
+        
+        # Check different price fields based on activity type
+        if hasattr(details, 'price') and details.price is not None:
+            return details.price  # FlightResult
+        if hasattr(details, 'total_price') and details.total_price is not None:
+            return details.total_price  # PropertyResult
+        if hasattr(details, 'cost_estimate') and details.cost_estimate is not None:
+            return details.cost_estimate  # TransportationActivity, GeneralActivity
+        
+        return None
 
 class DailyItinerary(BaseModel):
     """Single day in travel itinerary"""

@@ -10,30 +10,6 @@ from common.models.flight_models import FlightResult
 from common.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
 
 
-def _initialize_amadeus_client() -> Client:
-    """
-    Initialize Amadeus API client with credentials from environment
-    
-    Returns:
-        Configured Amadeus Client
-        
-    Raises:
-        ValueError: If credentials are missing
-    """
-    client_id = os.getenv('AMADEUS_CLIENT_ID')
-    client_secret = os.getenv('AMADEUS_CLIENT_SECRET')
-    hostname = os.getenv('AMADEUS_HOSTNAME', 'test')
-    
-    if not client_id or not client_secret:
-        raise ValueError("Amadeus credentials not found. Please set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET environment variables.")
-    
-    return Client(
-        client_id=client_id,
-        client_secret=client_secret,
-        hostname=hostname
-    )
-
-
 def _format_time(iso_datetime: str) -> str:
     """
     Convert ISO datetime string to readable time format
@@ -165,6 +141,7 @@ def _parse_all_flight_offers(flight_offers: List[Dict[str, Any]]) -> List[Flight
 
 
 def search_flights_direct(
+    amadeus_client: Optional[Client],
     origin: str, 
     destination: str, 
     departure_date: str,
@@ -181,6 +158,7 @@ def search_flights_direct(
     Search for flights using Amadeus Flight Offers Search API with comprehensive filtering
     
     Args:
+        amadeus_client: Pre-initialized Amadeus client (from agent session)
         origin: Origin airport code (IATA, e.g., 'JFK', 'LAX')
         destination: Destination airport code (IATA, e.g., 'LHR', 'CDG')
         departure_date: Departure date in YYYY-MM-DD format
@@ -210,8 +188,11 @@ def search_flights_direct(
     )
     
     try:
-        # Initialize Amadeus client
-        amadeus = _initialize_amadeus_client()
+        # Use provided Amadeus client (initialized once per session in agent __init__)
+        if not amadeus_client:
+            raise ValueError("Amadeus client not available - credentials may be missing")
+        
+        amadeus = amadeus_client
         
         # Prepare search parameters
         search_params = {
