@@ -4,8 +4,8 @@ Validation tools for travel information completeness
 from datetime import date, datetime
 from typing import Dict, List
 
-from common.models.travel_models import TravelInformation, ValidationResult
-from common.models.base_models import TripType
+from agents.models.travel_models import TravelInformation, ValidationResult
+from agents.models.base_models import TripType
 
 
 def validate_travel_requirements(travel_info: TravelInformation) -> ValidationResult:

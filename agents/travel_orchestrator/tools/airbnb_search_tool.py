@@ -5,9 +5,9 @@ import os
 from datetime import datetime
 from typing import List
 
-from common.browser_wrapper import BrowserWrapper
-from common.models.accommodation_models import PropertyResult, PlatformSearchResults
-from common.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
+from agents.browser_wrapper import BrowserWrapper
+from agents.models.accommodation_models import PropertyResult, PlatformSearchResults
+from agents.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
 
 
 def search_airbnb_direct(location: str, check_in: str, check_out: str, 

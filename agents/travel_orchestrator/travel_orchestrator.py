@@ -24,7 +24,7 @@ from tools.memory_hooks import TravelMemoryHook, generate_session_ids
 from tools.streaming_hooks import StreamingProgressHook
 
 # Import new unified response models from centralized common location
-from common.models.orchestrator_models import (
+from agents.models.orchestrator_models import (
     TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress,
 )
 
@@ -458,7 +458,7 @@ PRE-FLIGHT CHECKLIST (verify before responding):
 3. search_airbnb(location, check_in, check_out, guests=2)
    → Browser automation via Nova Act
    → Returns TravelOrchestratorResponse with accommodation_results array
-   → USE FOR: vacation rentals, apartments, unique stays, Airbnb-specific requests
+   → USE FOR: vacation rentals, apartments, unique stays, Airbnb-specific requests. Do not use this unless the user has explicitly requested this!!
    → Location accepts detailed addresses like 'Paris, France', 'Manhattan, NYC'
 
 4. searchPlacesByText(textQuery, includedType?, maxResultCount?, minRating?, 
@@ -470,7 +470,7 @@ PRE-FLIGHT CHECKLIST (verify before responding):
    → Additional Google Places tools for nearby searches and details
 
 ACCOMMODATION TOOL SELECTION GUIDE:
-→ For "hotels": Use search_hotels (faster, API-based)
+→ For "hotels" or "resorts": Use search_hotels (faster, API-based)
 → For "Airbnb" or "vacation rentals": Use search_airbnb
 → For "accommodations" (generic): Call BOTH tools in parallel for comprehensive results
 → LLM can intelligently choose based on user intent and context

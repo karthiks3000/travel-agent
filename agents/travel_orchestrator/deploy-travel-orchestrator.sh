@@ -58,25 +58,26 @@ if [[ ! -f "travel_orchestrator.py" ]]; then
     exit 1
 fi
 
-# Copy common directory for deployment (temporary)
-if [[ -d "../../common" ]]; then
-    print_status "Copying common directory for deployment (temporary)..."
-    # Copy common directory from project root, excluding the circular symlink
-    cp -r ../../common . 2>/dev/null || {
-        # If copy fails due to circular symlink, copy files individually
-        mkdir -p common
-        cp ../../common/__init__.py common/ 2>/dev/null || true
-        cp ../../common/browser_wrapper.py common/ 2>/dev/null || true
-        cp ../../common/*.py common/ 2>/dev/null || true
-        # Copy models subdirectory
-        if [[ -d "../../common/models" ]]; then
-            mkdir -p common/models
-            cp ../../common/models/*.py common/models/ 2>/dev/null || true
-        fi
-    }
-    print_status "Common directory copied successfully"
+# Copy agents directory files for deployment (temporary)
+if [[ -d "../models" ]]; then
+    print_status "Copying agents/models directory for deployment (temporary)..."
+    # Copy models from agents/models (one level up from travel_orchestrator)
+    mkdir -p agents/models
+    cp ../models/*.py agents/models/ 2>/dev/null || true
+    print_status "Models directory copied successfully"
 else
-    print_error "Common directory not found at ../../common"
+    print_error "Models directory not found at ../models"
+    exit 1
+fi
+
+# Copy browser_wrapper from agents directory
+if [[ -f "../browser_wrapper.py" ]]; then
+    print_status "Copying browser_wrapper.py for deployment (temporary)..."
+    mkdir -p agents
+    cp ../browser_wrapper.py agents/ 2>/dev/null || true
+    print_status "Browser wrapper copied successfully"
+else
+    print_error "Browser wrapper not found at ../browser_wrapper.py"
     exit 1
 fi
 

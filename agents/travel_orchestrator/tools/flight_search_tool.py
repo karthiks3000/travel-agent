@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from amadeus import Client, ResponseError
 
-from common.models.flight_models import FlightResult
-from common.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
+from agents.models.flight_models import FlightResult
+from agents.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
 
 
 def _format_time(iso_datetime: str) -> str:

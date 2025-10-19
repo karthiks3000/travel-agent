@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from amadeus import Client, ResponseError
 
-from common.models.accommodation_models import PropertyResult
-from common.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
+from agents.models.accommodation_models import PropertyResult
+from agents.models.orchestrator_models import TravelOrchestratorResponse, ResponseType, ResponseStatus, create_tool_progress
 
 
 def _get_hotels_by_city(amadeus: Client, city_code: str, max_hotels: int = 20) -> List[str]:
